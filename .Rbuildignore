@@ -1,0 +1,6 @@
+^research$
+^\\.Rhistory$
+^\\.Rproj\\.user$
+^\\.\\.?Rcheck$
+^inst/benchmarks/\\.Rhistory$
+^nbsurv_.*\\.tar\\.gz$

@@ -1,0 +1,6 @@
+.Rhistory
+.Rproj.user/
+..Rcheck/
+*.Rcheck/
+*.tar.gz
+*.pdf
