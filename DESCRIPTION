@@ -1,0 +1,34 @@
+Package: nbsurv
+Type: Package
+Title: Conditional Naive Bayes Survival Modelling for Right-Censored Data
+Version: 0.2.0
+Authors@R: person("Imad", "EL BADISY", email = "elbadisyimad@gmail.com", role = c("aut", "cre"))
+Author: Imad El Badisy [aut, cre]
+Maintainer: Imad EL BADISY <elbadisyimad@gmail.com>
+Description: Fits conditional naive Bayes survival models for right-censored
+    outcomes using inverse-probability of censoring weighting. The package
+    provides model fitting, prediction, resampling-based evaluation,
+    cross-validation, and hyper-parameter tuning utilities for
+    horizon-specific survival prediction.
+License: GPL-3
+Encoding: UTF-8
+Depends: 
+    R (>= 4.1.0)
+Imports:
+    graphics,
+    survival,
+    stats,
+    utils
+Suggests:
+    knitr,
+    pkgload,
+    pec,
+    quarto,
+    ranger,
+    rmarkdown,
+    testthat
+VignetteBuilder: knitr
+URL: https://github.com/imad-el-badisy/nbsurv
+BugReports: https://github.com/imad-el-badisy/nbsurv/issues
+Config/testthat/edition: 3
+RoxygenNote: 7.3.2
