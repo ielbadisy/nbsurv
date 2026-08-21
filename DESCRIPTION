@@ -2,7 +2,7 @@ Package: nbsurv
 Type: Package
 Title: Conditional Naive Bayes Survival Modelling for Right-Censored Data
 Version: 0.5.0
-Authors@R: person("Imad", "EL BADISY", email = "elbadisyimad@gmail.com", role = c("aut", "cre"))
+Authors@R: person("Imad", "El Badisy", email = "elbadisyimad@gmail.com", role = c("aut", "cre"))
 Description: Fits conditional naive Bayes survival models for right-censored
     outcomes using inverse-probability of censoring weighting. The package
     provides model fitting, prediction, resampling-based evaluation,
