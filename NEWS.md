@@ -1,3 +1,34 @@
+# nbsurv 0.4.0
+
+## New features
+
+* New `cov_structure = c("diagonal", "full")` argument to `nbsurv()`/
+  `cv_nbsurv()` (default `"diagonal"`, fully backward-compatible). With
+  `"full"`, continuous predictors are modeled jointly as a single
+  multivariate Gaussian per class (survivor/event), relaxing naive Bayes's
+  conditional-independence assumption between them, instead of the product
+  of independent univariate Gaussians. The covariance matrix is shrunk
+  toward its diagonal by the new `shrinkage` argument (default `0.2`) for
+  numerical stability at small sample sizes. Categorical predictors are
+  unaffected and remain conditionally independent either way. With fewer
+  than 2 continuous predictors, `"full"` is numerically identical to
+  `"diagonal"` (verified by regression test).
+* **Empirical validation** (see `tests/testthat/test-cov-structure.R`): on
+  a synthetic case with two continuous predictors correlated at r=0.85,
+  `cov_structure = "full"` gives a consistent ~5-6% relative improvement in
+  held-out IPCW Brier score over `"diagonal"` at every horizon tested. Its
+  effect on **concordance is small and inconsistent** even under strong
+  correlation - concordance depends only on the *ranking* of risk scores,
+  which a monotonic transform of the naive product often preserves even
+  when the underlying probabilities are miscalibrated; Brier score, which
+  scores the actual probability values, is the metric this correction
+  reliably improves. On the real `lung` dataset (`age`/`ph.ecog` correlated
+  at r=0.31, n=167), the improvement was smaller and mixed (Brier improved
+  at 2 of 3 horizons tested, concordance improved at 2 of 3) - `"full"` is
+  a genuine, validated improvement when continuous predictors are
+  correlated, not a guaranteed win on every dataset, and did not close the
+  gap to `coxph` on `lung` specifically (see README benchmark).
+
 # nbsurv 0.3.2
 
 ## Bug fixes (scientific validity)

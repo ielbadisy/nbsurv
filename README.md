@@ -180,11 +180,43 @@ accuracy in exchange for a much simpler, distribution-light estimation
 procedure. The gap is real but small (concordance within ~0.03-0.05,
 Brier within ~0.01-0.05).
 
+`cov_structure = "full"` (below) relaxes that independence assumption
+between continuous predictors, but on this dataset (`age`/`ph.ecog`
+correlated at only r=0.31, n=167) it doesn't close the gap - it's a
+genuine, validated improvement when continuous predictors are more
+strongly correlated (see below), not a guaranteed win on every dataset.
+
+## Relaxing the independence assumption: `cov_structure = "full"`
+
+By default, continuous predictors are modeled as independent given the
+class (survivor/event) - the classic naive Bayes assumption.
+`cov_structure = "full"` instead models them jointly as a single
+multivariate Gaussian per class, capturing correlation between them:
+
+```r
+fit_full <- nbsurv(
+  Surv(time, status) ~ age + sex + ph.ecog,
+  data = lung,
+  cov_structure = "full"
+)
+```
+
+On a synthetic case with two continuous predictors correlated at r=0.85
+(20 held-out 70/30 splits), `"full"` gives a consistent ~5-6% relative
+improvement in Brier score over `"diagonal"` at every horizon tested; its
+effect on concordance is small and inconsistent even at that correlation
+strength, since concordance only depends on the *ranking* of risk scores,
+which the naive product often preserves even when miscalibrated. This is
+a real, tested effect (`tests/testthat/test-cov-structure.R`) - but
+whether it helps on *your* data depends on how correlated your continuous
+predictors actually are.
+
 ## Notes
 
 - `predict()` returns monotone survival curves by applying a cumulative minimum
   across increasing horizons.
-- Continuous predictors are modeled with Gaussian class-conditional densities.
+- Continuous predictors are modeled with Gaussian class-conditional densities
+  (independent by default, or jointly via `cov_structure = "full"`).
 - Categorical predictors use Laplace-smoothed probabilities.
 - The package exposes a single clean public API centered on `nbsurv()`,
   `predict()`, `evaluate_nbsurv()`, `cv_nbsurv()`, `tune_nbsurv()`, and

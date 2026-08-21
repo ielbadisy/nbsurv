@@ -4,7 +4,10 @@ nbsurv <- function(formula,
                    laplace = 1,
                    min_sd = 0.05,
                    time_grid = NULL,
-                   eps = 1e-06) {
+                   eps = 1e-06,
+                   cov_structure = c("diagonal", "full"),
+                   shrinkage = 0.2) {
+  cov_structure <- match.arg(cov_structure)
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.omit)
   y <- stats::model.response(mf)
 
@@ -53,7 +56,9 @@ nbsurv <- function(formula,
     laplace = laplace,
     min_sd = min_sd,
     eps = eps,
-    time_grid = time_grid
+    time_grid = time_grid,
+    cov_structure = cov_structure,
+    shrinkage = shrinkage
   )
 
   class(object) <- "nbsurv"
@@ -69,7 +74,10 @@ cv_nbsurv <- function(formula,
                       laplace = 1,
                       min_sd = 0.05,
                       time_grid = NULL,
-                      eps = 1e-06) {
+                      eps = 1e-06,
+                      cov_structure = c("diagonal", "full"),
+                      shrinkage = 0.2) {
+  cov_structure <- match.arg(cov_structure)
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.omit)
   data_complete <- data[rownames(mf), , drop = FALSE]
   y <- stats::model.response(mf)
@@ -93,7 +101,9 @@ cv_nbsurv <- function(formula,
         laplace = laplace,
         min_sd = min_sd,
         time_grid = time_grid,
-        eps = eps
+        eps = eps,
+        cov_structure = cov_structure,
+        shrinkage = shrinkage
       )
 
       metrics <- evaluate_nbsurv(fit, newdata = test, times = eval_times)
@@ -301,23 +311,36 @@ predict.nbsurv <- function(object,
         train_x = train_x[, cont_vars, drop = FALSE],
         event_weights = event_weights,
         survivor_index = survivor_index,
-        min_sd = object$min_sd
+        min_sd = object$min_sd,
+        cov_structure = if (is.null(object$cov_structure)) "diagonal" else object$cov_structure,
+        shrinkage = if (is.null(object$shrinkage)) 0.2 else object$shrinkage
       )
 
       if (!is.null(cont_stats)) {
         new_cont <- as.matrix(new_x[, cont_vars, drop = FALSE])
-        log_surv <- log_surv + rowSums(stats::dnorm(
-          x = new_cont,
-          mean = cont_stats$survivor_mean,
-          sd = cont_stats$survivor_sd,
-          log = TRUE
-        ))
-        log_event <- log_event + rowSums(stats::dnorm(
-          x = new_cont,
-          mean = cont_stats$event_mean,
-          sd = cont_stats$event_sd,
-          log = TRUE
-        ))
+        use_full <- identical(object$cov_structure, "full") &&
+          length(cont_vars) >= 2L && !is.null(cont_stats$survivor_cov)
+        if (use_full) {
+          log_surv <- log_surv + mvnorm_log_density(
+            new_cont, cont_stats$survivor_mean, cont_stats$survivor_cov
+          )
+          log_event <- log_event + mvnorm_log_density(
+            new_cont, cont_stats$event_mean, cont_stats$event_cov
+          )
+        } else {
+          log_surv <- log_surv + rowSums(stats::dnorm(
+            x = new_cont,
+            mean = cont_stats$survivor_mean,
+            sd = cont_stats$survivor_sd,
+            log = TRUE
+          ))
+          log_event <- log_event + rowSums(stats::dnorm(
+            x = new_cont,
+            mean = cont_stats$event_mean,
+            sd = cont_stats$event_sd,
+            log = TRUE
+          ))
+        }
       }
     }
 
@@ -360,6 +383,7 @@ print.nbsurv <- function(x, ...) {
   cat("Training rows:", nrow(x$training_data), "\n")
   cat("Predictors:", paste(names(x$feature_info), collapse = ", "), "\n")
   cat("Prediction grid size:", length(x$time_grid), "\n")
+  cat("Covariance structure:", if (is.null(x$cov_structure)) "diagonal" else x$cov_structure, "\n")
   invisible(x)
 }
 
@@ -466,7 +490,8 @@ event_case_weights <- function(object, horizon) {
   as.numeric(object$times < horizon & object$status == 1) / at_risk_censor
 }
 
-continuous_statistics <- function(train_x, event_weights, survivor_index, min_sd) {
+continuous_statistics <- function(train_x, event_weights, survivor_index, min_sd,
+                                   cov_structure = "diagonal", shrinkage = 0.2) {
   if (!any(event_weights > 0) || !any(survivor_index)) {
     return(NULL)
   }
@@ -480,12 +505,49 @@ continuous_statistics <- function(train_x, event_weights, survivor_index, min_sd
   survivor_second <- colMeans(train_x[survivor_index, , drop = FALSE] ^ 2)
   survivor_sd <- floor_sd(sqrt(pmax(survivor_second - survivor_mean ^ 2, 0)), min_sd)
 
-  list(
+  out <- list(
     event_mean = event_mean,
     event_sd = event_sd,
     survivor_mean = survivor_mean,
     survivor_sd = survivor_sd
   )
+
+  if (identical(cov_structure, "full") && ncol(train_x) >= 2L) {
+    out$event_cov <- shrink_cov(
+      weighted_cov(train_x, event_weights, event_mean), shrinkage, floor_var = min_sd^2
+    )
+    out$survivor_cov <- shrink_cov(
+      weighted_cov(
+        train_x[survivor_index, , drop = FALSE],
+        rep(1, sum(survivor_index)),
+        survivor_mean
+      ),
+      shrinkage,
+      floor_var = min_sd^2
+    )
+  }
+
+  out
+}
+
+weighted_cov <- function(x, w, mean) {
+  xc <- sweep(x, 2, mean, "-")
+  (crossprod(xc, xc * w)) / sum(w)
+}
+
+shrink_cov <- function(sigma, shrinkage, floor_var) {
+  d <- pmax(diag(sigma), floor_var)
+  target <- diag(d, nrow = length(d))
+  shrunk <- (1 - shrinkage) * sigma + shrinkage * target
+  diag(shrunk) <- pmax(diag(shrunk), floor_var)
+  shrunk
+}
+
+mvnorm_log_density <- function(x, mean, sigma) {
+  p <- ncol(x)
+  maha <- stats::mahalanobis(x, center = mean, cov = sigma)
+  log_det <- as.numeric(determinant(sigma, logarithm = TRUE)$modulus)
+  -0.5 * (p * log(2 * pi) + log_det + maha)
 }
 
 categorical_statistics <- function(values, event_weights, survivor_index, laplace) {

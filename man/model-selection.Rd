@@ -14,7 +14,9 @@ cv_nbsurv(
   laplace = 1,
   min_sd = 0.05,
   time_grid = NULL,
-  eps = 1e-06
+  eps = 1e-06,
+  cov_structure = c("diagonal", "full"),
+  shrinkage = 0.2
 )
 
 evaluate_nbsurv(object, newdata, times, metrics = c("brier", "concordance"), ibs = FALSE)
@@ -42,6 +44,8 @@ tune_nbsurv(
   \item{min_sd}{Lower bound used for Gaussian standard deviations.}
   \item{time_grid}{Optional prediction grid stored with each fitted model.}
   \item{eps}{Small numerical constant used in probability clipping and IPCW calculations.}
+  \item{cov_structure}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
+  \item{shrinkage}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
   \item{object}{A fitted \code{"nbsurv"} model.}
   \item{newdata}{Evaluation data containing the same outcome and predictors as the training formula.}
   \item{metrics}{Performance metrics to compute. One or both of \code{"brier"} and \code{"concordance"}.}
