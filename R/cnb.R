@@ -599,8 +599,14 @@ ipcw_brier_score <- function(time, status, pred_event, horizon, eps) {
 }
 
 concordance_at_horizon <- function(time, status, risk) {
+  # survival::concordance()'s formula interface defaults to the opposite
+  # direction convention from a risk score (higher = longer survival unless
+  # told otherwise); `risk` here is always higher = more risk = shorter
+  # survival (e.g. an event probability), so reverse = TRUE is required for
+  # the returned value to be a genuine concordance rather than its
+  # complement (1 - concordance).
   out <- tryCatch(
-    survival::concordance(survival::Surv(time, status) ~ risk)$concordance,
+    survival::concordance(survival::Surv(time, status) ~ risk, reverse = TRUE)$concordance,
     error = function(e) NA_real_
   )
   as.numeric(out)
