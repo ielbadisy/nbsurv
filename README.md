@@ -45,7 +45,11 @@ round(event_prob, 3)
 #> 3 0.253 0.573 0.748
 #> 4 0.199 0.308 0.595
 #> 5 0.324 0.466 0.725
+
+plot(fit, times = c(50, 100, 200, 400, 600, 800))
 ```
+
+<img src="man/figures/README-survival-curves.png" width="100%" />
 
 ## Evaluation
 
@@ -86,7 +90,11 @@ cv_fit$summary
 #> 1  100 0.1233948   0.4970275
 #> 2  200 0.2305867   0.5100311
 #> 3  400 0.2683234   0.5092288
+
+plot(cv_fit)
 ```
+
+<img src="man/figures/README-cv.png" width="100%" />
 
 ## Hyper-parameter tuning
 
@@ -110,7 +118,11 @@ tuned <- tune_nbsurv(
 tuned$best_params
 #>   scale laplace min_sd time_grid mean_metric
 #> 1  TRUE       1   0.05              0.207435
+
+plot(tuned)
 ```
+
+<img src="man/figures/README-tune.png" width="100%" />
 
 ## Variable importance
 
@@ -135,22 +147,14 @@ vi
 plot(vi)
 ```
 
+<img src="man/figures/README-varimp.png" width="100%" />
+
 `age` and `ph.ecog` degrade the Brier score the most when permuted (most
 important); `sex` slightly *improves* it when shuffled here, i.e. it
 contributes essentially nothing beyond noise on this fit/horizon set.
 
-## Visualization
-
-Base-graphics `plot()` methods are available for `nbsurv` fits and every
-result object above:
-
-```r
-plot(fit, times = c(50, 100, 200, 400, 800))   # survival curves for training rows
-plot(vi)                                       # variable importance bar chart
-plot(cv_fit)                                   # mean CV metric vs. horizon
-plot(tuned)                                    # mean tuning metric per candidate
-calibration_plot_nbsurv(fit, newdata = lung, horizon = 200)
-```
+`calibration_plot_nbsurv(fit, newdata = lung, horizon = 200)` is also
+available for visual calibration assessment at a single horizon.
 
 ## Notes
 
