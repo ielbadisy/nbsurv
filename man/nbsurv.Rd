@@ -11,7 +11,9 @@ nbsurv(
   time_grid = NULL,
   eps = 1e-06,
   cov_structure = c("diagonal", "full"),
-  shrinkage = 0.2
+  shrinkage = 0.2,
+  time_smooth = FALSE,
+  bandwidth = NULL
 )
 }
 \arguments{
@@ -35,6 +37,27 @@ nbsurv(
   \item{shrinkage}{Shrinkage weight toward the diagonal covariance, in `[0, 1]`, used only
     when \code{cov_structure = "full"}. `0` uses the raw sample covariance (more variance,
     especially at small `n`); `1` is equivalent to `"diagonal"`. Default `0.2`.}
+  \item{time_smooth}{Logical, default \code{FALSE}. If \code{TRUE}, class-conditional
+    statistics (means, covariances, categorical probabilities) are estimated once at every
+    point of \code{time_grid} at fit time, then combined across horizons via Nadaraya-Watson
+    kernel regression (Gaussian kernel, width \code{bandwidth}) when \code{predict()} is
+    called at a given horizon, instead of being re-estimated from scratch, independently, at
+    each requested horizon. This borrows statistical strength from neighboring horizons,
+    reducing estimation variance where one of the two horizon-defined classes (subjects who
+    already failed vs. subjects known to survive past it) is sparse - typically near the
+    earliest or latest horizons requested - while still allowing genuinely time-varying
+    effects (unlike a proportional-hazards model, which shares a single coefficient across
+    all of time). A convex (weight-normalized) combination of the per-grid-point statistics
+    is used, so smoothed covariance matrices stay positive semi-definite and smoothed
+    categorical probabilities stay valid automatically, with no extra correction needed.
+    Increases fit time (every grid point's statistics are computed once, up front) but not
+    predict time. Empirically (see `NEWS.md`) trades ranking robustness (concordance) for
+    calibration at extreme horizons as `bandwidth` widens, and vice versa as it narrows -
+    tune `bandwidth` via \code{\link{tune_nbsurv}} rather than relying on the default for a
+    specific dataset.}
+  \item{bandwidth}{Kernel bandwidth (in the same units as \code{time}), used only when
+    \code{time_smooth = TRUE}. Defaults to one quarter of the fitted \code{time_grid}'s range
+    when \code{NULL}.}
 }
 \value{
 An object of class \code{"nbsurv"}.

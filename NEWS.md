@@ -1,3 +1,64 @@
+# nbsurv 0.5.0
+
+## New features: kernel-smoothed horizons (`time_smooth`)
+
+* New `time_smooth = TRUE` / `bandwidth` arguments to `nbsurv()`/
+  `cv_nbsurv()` (default `FALSE`, fully backward-compatible). The real
+  remaining inefficiency identified after `cov_structure = "full"` (0.4.0):
+  every horizon was fit *completely independently*, discarding the fact
+  that class-conditional statistics should vary smoothly with time -
+  costly right where one of the two horizon-defined classes (already
+  failed vs. known to survive) is smallest, typically near the earliest or
+  latest requested horizon. `time_smooth = TRUE` precomputes class-
+  conditional statistics once at every point of `time_grid` at fit time,
+  then combines them at `predict()` time via Nadaraya-Watson kernel
+  regression across horizons (Gaussian kernel, width `bandwidth`) -
+  borrowing strength from neighboring horizons while still allowing
+  genuinely time-varying effects, unlike a proportional-hazards model
+  that shares one coefficient across all of time. Because the combination
+  is a convex (weight-normalized) average of already-valid per-grid-point
+  statistics, smoothed covariance matrices stay positive semi-definite and
+  smoothed categorical probabilities stay valid automatically - no PSD
+  repair or renormalization needed. `bandwidth` is now a tunable column in
+  `tune_nbsurv()`'s `param_grid`.
+* **Bug fix found and fixed during implementation**: the first working
+  version returned `NA` for every smoothed prediction. `0 * NA` is still
+  `NA` in R, so zero-weighting an invalid (all-`NA`) grid point before
+  summing did not neutralize it; `colSums()` propagated the `NA`. Fixed by
+  zeroing the invalid rows' *values*, not just their weights, before
+  summing. Regression test locks this in
+  (`tests/testthat/test-time-smooth.R`).
+* **Empirical validation** against `coxph` on `lung` (20 held-out 70/30
+  splits, `age + sex + ph.ecog`): a genuine, principled bias-variance
+  tradeoff, confirmed rather than assumed. Concordance improves as
+  `bandwidth` widens (0.60 at the default heuristic up to ~0.615-0.619 as
+  bandwidth grows toward pooling most of the time range), closing roughly
+  half to two-thirds of the gap to `coxph`'s 0.629 - but IPCW Brier score
+  at the most extreme horizon tested (t=400) *worsens* monotonically as
+  bandwidth widens (0.240 to 0.254), the expected cost of over-smoothing
+  away genuine horizon-specific calibration. No single bandwidth wins on
+  both metrics at every horizon; the default heuristic (one quarter of the
+  fitted time range) is a reasonable balance, not a universally optimal
+  choice - **use `tune_nbsurv()`'s `bandwidth` grid column to tune it for
+  a specific dataset**, exactly as any other hyperparameter.
+* Even at the best bandwidths tried, the `lung` benchmark gap to `coxph`
+  narrows but does not fully close - reported honestly in the README
+  rather than oversold. `age`/`ph.ecog`'s covariate effects are close to
+  log-linear and non-interacting on this dataset, which is exactly what a
+  correctly-specified Cox model is built to exploit; `nbsurv`'s value
+  proposition is flexibility (genuinely time-varying, non-proportional
+  effects a fixed-coefficient Cox model cannot represent), not raw
+  accuracy dominance on every dataset.
+* **No C++ was added.** Benchmarked at n=5000 (3270 distinct event times):
+  `time_smooth = TRUE` fit time is ~2.5s vs ~0.03s without it - a real but
+  tolerable one-time cost at realistic survival-analysis sample sizes,
+  with predict() itself remaining fast (~17ms for 500 predictions) since
+  it only does cheap kernel-weighted averaging over the precomputed grid.
+  The existing `time_grid` argument already lets users pass a coarser
+  custom grid to cut this cost further if needed. Rcpp would be
+  unjustified complexity for a bottleneck that doesn't clearly exist at
+  the scale this package targets.
+
 # nbsurv 0.4.0
 
 ## New features

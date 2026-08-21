@@ -211,6 +211,55 @@ a real, tested effect (`tests/testthat/test-cov-structure.R`) - but
 whether it helps on *your* data depends on how correlated your continuous
 predictors actually are.
 
+## Borrowing strength across horizons: `time_smooth = TRUE`
+
+The remaining inefficiency vs. `coxph`: every horizon is fit completely
+independently by default, discarding the fact that the true
+class-conditional statistics should vary *smoothly* with time. This costs
+accuracy right where one of the two horizon-defined classes (already
+failed vs. known to survive) is smallest - typically near the earliest or
+latest requested horizon. `time_smooth = TRUE` precomputes class-conditional
+statistics at every point of the internal `time_grid` once at fit time,
+then blends them at `predict()` time via kernel regression across nearby
+horizons:
+
+```r
+fit_smooth <- nbsurv(
+  Surv(time, status) ~ age + sex + ph.ecog,
+  data = lung,
+  time_smooth = TRUE,
+  bandwidth = 300  # tune via tune_nbsurv() for your data
+)
+```
+
+Re-running the `coxph` benchmark above with `time_smooth = TRUE` at a few
+bandwidths (still 20 held-out 70/30 splits):
+
+```r
+#>                  brier (t=100,200,400)   concordance (t=100,200,400)
+#> diagonal         0.1312, 0.2051, 0.2397  0.601, 0.611, 0.579
+#> smooth (bw=101)  0.1284, 0.2030, 0.2413  0.601, 0.613, 0.608
+#> smooth (bw=200)  0.1273, 0.2023, 0.2463  0.608, 0.613, 0.618
+#> smooth (bw=500)  0.1265, 0.2013, 0.2528  0.614, 0.614, 0.617
+#> coxph            0.1304, 0.1950, 0.2344  0.629, 0.629, 0.629
+```
+
+A genuine bias-variance tradeoff, confirmed rather than assumed: wider
+bandwidths consistently improve concordance (closing roughly half to
+two-thirds of the gap to `coxph`) but consistently *worsen* Brier score at
+the most extreme horizon (t=400), the expected cost of over-smoothing away
+real horizon-specific calibration. No single bandwidth wins on both
+metrics at every horizon - **tune `bandwidth` via `tune_nbsurv()`'s
+`param_grid` for your own data** rather than trusting the default.
+
+Even at the best bandwidths tried here, the gap to `coxph` narrows but does
+not fully close. `age`/`ph.ecog` have close-to-log-linear, non-interacting
+effects on this dataset - exactly what a correctly-specified Cox model is
+built to exploit. `nbsurv`'s value proposition is flexibility (genuinely
+time-varying effects a fixed-coefficient Cox model can't represent), not
+guaranteed accuracy dominance on every dataset - reported honestly here
+rather than oversold.
+
 ## Notes
 
 - `predict()` returns monotone survival curves by applying a cumulative minimum
