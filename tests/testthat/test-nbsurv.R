@@ -188,3 +188,18 @@ test_that("print and plot methods execute without error", {
 
   expect_equal(dim(plotted), c(3, 3))
 })
+
+test_that("plot.nbsurv's curves match predict() on the same raw rows (no double-scaling)", {
+  skip_if_not_installed("survival")
+  lung <- make_lung_data()
+  fit <- nbsurv(survival::Surv(time, status) ~ age + sex + ph.ecog, data = lung)
+
+  grDevices::pdf(file = tempfile(fileext = ".pdf"))
+  on.exit(grDevices::dev.off(), add = TRUE)
+  plotted <- plot(fit, times = c(100, 200, 400), n_curves = 4)
+
+  raw_rows <- fit$training_data_raw[1:4, , drop = FALSE]
+  direct <- predict(fit, newdata = raw_rows, times = c(100, 200, 400), type = "survival")
+
+  expect_equal(unname(plotted), unname(direct))
+})

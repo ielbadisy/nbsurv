@@ -17,6 +17,7 @@ nbsurv <- function(formula,
 
   feature_info <- vapply(x, classify_feature, character(1))
   x <- coerce_features(x, feature_info)
+  x_raw <- x
 
   scaling <- NULL
   cont_vars <- names(feature_info[feature_info == "continuous"])
@@ -42,6 +43,7 @@ nbsurv <- function(formula,
     xlevels = lapply(x[, feature_info == "categorical", drop = FALSE], levels),
     feature_info = feature_info,
     training_data = x,
+    training_data_raw = x_raw,
     response = y,
     times = times,
     status = status,
@@ -371,7 +373,7 @@ plot.nbsurv <- function(x, times = NULL, n_curves = 5, ...) {
 
   curves <- predict.nbsurv(
     x,
-    newdata = utils::head(x$training_data, n_curves),
+    newdata = utils::head(x$training_data_raw, n_curves),
     times = times,
     type = "survival"
   )
