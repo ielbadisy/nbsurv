@@ -11,12 +11,16 @@ prediction with inverse-probability of censoring weighting, and includes
 tools for model fitting, prediction, evaluation, cross-validation,
 hyper-parameter tuning, and permutation variable importance.
 
+All results below are real output from `lung` (from the `survival` package,
+rows with missing predictors dropped).
+
 ## Main workflow
 
 ```r
 library(nbsurv)
 library(survival)
 
+lung <- na.omit(lung)
 lung$status <- as.integer(lung$status == 2)
 
 fit <- nbsurv(
@@ -25,7 +29,22 @@ fit <- nbsurv(
 )
 
 surv_prob <- predict(fit, newdata = lung[1:5, ], times = c(100, 200, 400))
+round(surv_prob, 3)
+#>   t_100 t_200 t_400
+#> 1 0.839 0.717 0.449
+#> 2 0.919 0.708 0.381
+#> 3 0.747 0.427 0.252
+#> 4 0.801 0.692 0.405
+#> 5 0.676 0.534 0.275
+
 event_prob <- predict(fit, newdata = lung[1:5, ], times = c(100, 200, 400), type = "event")
+round(event_prob, 3)
+#>   t_100 t_200 t_400
+#> 1 0.161 0.283 0.551
+#> 2 0.081 0.292 0.619
+#> 3 0.253 0.573 0.748
+#> 4 0.199 0.308 0.595
+#> 5 0.324 0.466 0.725
 ```
 
 ## Evaluation
@@ -38,6 +57,10 @@ metrics <- evaluate_nbsurv(
 )
 
 metrics
+#>   time     brier concordance
+#> 1  100 0.1249025   0.4823930
+#> 2  200 0.2299579   0.4944150
+#> 3  400 0.2454511   0.5017986
 ```
 
 `evaluate_nbsurv()` currently returns:
@@ -59,6 +82,10 @@ cv_fit <- cv_nbsurv(
 )
 
 cv_fit$summary
+#>   time     brier concordance
+#> 1  100 0.1233948   0.4970275
+#> 2  200 0.2305867   0.5100311
+#> 3  400 0.2683234   0.5092288
 ```
 
 ## Hyper-parameter tuning
@@ -81,6 +108,48 @@ tuned <- tune_nbsurv(
 )
 
 tuned$best_params
+#>   scale laplace min_sd time_grid mean_metric
+#> 1  TRUE       1   0.05              0.207435
+```
+
+## Variable importance
+
+```r
+vi <- varimp_nbsurv(
+  fit,
+  newdata = lung,
+  times = c(100, 200, 400),
+  n_repeats = 10,
+  seed = 1
+)
+
+vi
+#> nbsurv permutation variable importance
+#> Metric: brier | repeats: 10
+#>
+#>  feature  baseline  permuted   importance
+#>      age 0.2001038 0.2066950  0.006591213
+#>  ph.ecog 0.2001038 0.2047293  0.004625528
+#>      sex 0.2001038 0.1973498 -0.002753981
+
+plot(vi)
+```
+
+`age` and `ph.ecog` degrade the Brier score the most when permuted (most
+important); `sex` slightly *improves* it when shuffled here, i.e. it
+contributes essentially nothing beyond noise on this fit/horizon set.
+
+## Visualization
+
+Base-graphics `plot()` methods are available for `nbsurv` fits and every
+result object above:
+
+```r
+plot(fit, times = c(50, 100, 200, 400, 800))   # survival curves for training rows
+plot(vi)                                       # variable importance bar chart
+plot(cv_fit)                                   # mean CV metric vs. horizon
+plot(tuned)                                    # mean tuning metric per candidate
+calibration_plot_nbsurv(fit, newdata = lung, horizon = 200)
 ```
 
 ## Notes
@@ -90,4 +159,5 @@ tuned$best_params
 - Continuous predictors are modeled with Gaussian class-conditional densities.
 - Categorical predictors use Laplace-smoothed probabilities.
 - The package exposes a single clean public API centered on `nbsurv()`,
-  `predict()`, `evaluate_nbsurv()`, `cv_nbsurv()`, and `tune_nbsurv()`.
+  `predict()`, `evaluate_nbsurv()`, `cv_nbsurv()`, `tune_nbsurv()`, and
+  `varimp_nbsurv()`.
