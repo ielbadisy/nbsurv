@@ -9,7 +9,9 @@ nbsurv(
   laplace = 1,
   min_sd = 0.05,
   time_grid = NULL,
-  eps = 1e-06
+  eps = 1e-06,
+  cov_structure = c("diagonal", "full"),
+  shrinkage = 0.2
 )
 }
 \arguments{
@@ -20,6 +22,19 @@ nbsurv(
   \item{min_sd}{Lower bound used for Gaussian standard deviations.}
   \item{time_grid}{Optional numeric vector of prediction horizons stored with the fit.}
   \item{eps}{Small numerical constant used to clip probabilities away from 0 and 1.}
+  \item{cov_structure}{\code{"diagonal"} (default): continuous predictors are modeled as
+    conditionally independent (the classic naive Bayes assumption), each with its own
+    class-conditional Gaussian. \code{"full"}: continuous predictors are modeled jointly as a
+    single multivariate Gaussian per class (with covariance shrunk toward diagonal by
+    \code{shrinkage}), relaxing the independence assumption between them. Categorical
+    predictors are always treated as conditionally independent regardless of this setting.
+    Requires 2+ continuous predictors to have any effect; with only one, \code{"full"} is
+    numerically identical to \code{"diagonal"}. Empirically improves the IPCW Brier score
+    (calibration) when continuous predictors are correlated, with a smaller and less
+    consistent effect on concordance (ranking) - see \code{vignette("nbsurv-workflow")}.}
+  \item{shrinkage}{Shrinkage weight toward the diagonal covariance, in `[0, 1]`, used only
+    when \code{cov_structure = "full"}. `0` uses the raw sample covariance (more variance,
+    especially at small `n`); `1` is equivalent to `"diagonal"`. Default `0.2`.}
 }
 \value{
 An object of class \code{"nbsurv"}.
