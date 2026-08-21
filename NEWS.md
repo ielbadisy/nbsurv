@@ -1,3 +1,23 @@
+# nbsurv 0.3.1
+
+## Bug fixes
+
+* **`plot.nbsurv()` silently double-scaled continuous predictors before
+  plotting, distorting every survival curve it drew.** `nbsurv()` only ever
+  stored the *scaled* training data on the fit object; `plot.nbsurv()`
+  passed that already-scaled data into `predict()`, whose `prepare_newdata()`
+  step scales its input again using the same stored means/sds. The result
+  was visually "chunky" curves with implausible flat segments and near-zero
+  collapses for some rows, especially past t=400 in the README example -
+  not real model behavior, an artifact of predicting from
+  twice-standardized covariates. Fixed by storing the raw (unscaled)
+  training data separately (`fit$training_data_raw`) and having
+  `plot.nbsurv()` use that instead. `predict()`/`evaluate_nbsurv()`/
+  `cv_nbsurv()`/`tune_nbsurv()`/`varimp_nbsurv()` were never affected - they
+  operate on user-supplied `newdata`, which is only ever scaled once. New
+  regression test locks `plot.nbsurv()`'s curves to match `predict()`
+  called directly on the same raw rows.
+
 # nbsurv 0.3.0
 
 ## New features
