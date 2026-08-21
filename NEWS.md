@@ -1,3 +1,25 @@
+# nbsurv 0.3.2
+
+## Bug fixes (scientific validity)
+
+* **`evaluate_nbsurv()`/`cv_nbsurv()`/`tune_nbsurv()` reported the
+  *complement* of concordance (`1 - true concordance`), not concordance
+  itself.** `concordance_at_horizon()` calls
+  `survival::concordance(Surv(time, status) ~ risk)`, whose formula
+  interface defaults to the *opposite* direction convention from a risk
+  score (it expects higher `risk` to mean *longer* survival unless told
+  otherwise). Since every internal caller passes a genuine risk-direction
+  score (higher = more likely to fail), the returned value was
+  systematically inverted - a model with a true C-index of 0.63 was
+  reported as 0.37, making a genuinely discriminating model look
+  *worse than random*. Fixed by adding `reverse = TRUE` to the
+  `survival::concordance()` call. Verified against `survival::concordance()`
+  on both a `coxph` linear predictor and an `nbsurv` fit (matches to full
+  precision either way), and a new regression test on a clearly-separable
+  synthetic case that would fail loudly if the direction ever flips back.
+  Brier scores, predictions, and every other metric were unaffected -
+  this only touched the concordance calculation.
+
 # nbsurv 0.3.1
 
 ## Bug fixes

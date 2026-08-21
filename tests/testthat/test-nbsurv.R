@@ -42,6 +42,25 @@ test_that("categorical predictors reject unseen levels at prediction time", {
   )
 })
 
+test_that("evaluate_nbsurv's concordance is oriented correctly (not its complement)", {
+  # A clearly separable synthetic case: group 1 fails much earlier than
+  # group 0. A reasonable model MUST score meaningfully above 0.5 here;
+  # concordance_at_horizon() previously returned 1 - true_concordance
+  # because survival::concordance()'s formula interface needs
+  # reverse = TRUE for a higher-risk-scores-shorter-survival convention.
+  set.seed(1)
+  n <- 300
+  grp <- rep(c(0, 1), each = n / 2)
+  event_time <- ifelse(grp == 1, rexp(n, rate = 1 / 20), rexp(n, rate = 1 / 200))
+  status <- rep(1L, n)
+  dat <- data.frame(time = event_time, status = status, grp = factor(grp))
+
+  fit <- nbsurv(survival::Surv(time, status) ~ grp, data = dat)
+  m <- evaluate_nbsurv(fit, newdata = dat, times = c(10, 20, 40))
+
+  expect_true(all(m$concordance > 0.7))
+})
+
 test_that("evaluate_nbsurv returns finite metrics", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()

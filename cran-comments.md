@@ -1,4 +1,4 @@
-# CRAN submission comments — nbsurv 0.3.1
+# CRAN submission comments — nbsurv 0.3.2
 
 ## Test environments
 

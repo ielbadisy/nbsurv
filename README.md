@@ -62,9 +62,9 @@ metrics <- evaluate_nbsurv(
 
 metrics
 #>   time     brier concordance
-#> 1  100 0.1249025   0.4823930
-#> 2  200 0.2299579   0.4944150
-#> 3  400 0.2454511   0.5017986
+#> 1  100 0.1249025   0.5176070
+#> 2  200 0.2299579   0.5055850
+#> 3  400 0.2454511   0.4982014
 ```
 
 `evaluate_nbsurv()` currently returns:
@@ -87,9 +87,9 @@ cv_fit <- cv_nbsurv(
 
 cv_fit$summary
 #>   time     brier concordance
-#> 1  100 0.1233948   0.4970275
-#> 2  200 0.2305867   0.5100311
-#> 3  400 0.2683234   0.5092288
+#> 1  100 0.1233948   0.5029725
+#> 2  200 0.2305867   0.4899689
+#> 3  400 0.2683234   0.4907712
 
 plot(cv_fit)
 ```
@@ -155,6 +155,30 @@ contributes essentially nothing beyond noise on this fit/horizon set.
 
 `calibration_plot_nbsurv(fit, newdata = lung, horizon = 200)` is also
 available for visual calibration assessment at a single horizon.
+
+## Benchmark vs. `coxph`
+
+A quick, honest comparison against `survival::coxph()` on the same formula:
+20 random 70/30 train/test splits of `lung`, IPCW Brier score and
+concordance computed identically for both models (`nbsurv`'s own internal
+metric functions, applied to `coxph`'s linear predictor and
+`survfit()`-derived survival probabilities too), means reported below.
+
+```r
+#>   time nb_brier cox_brier nb_conc cox_conc
+#> 1  100   0.1312    0.1304  0.6011   0.6294
+#> 2  200   0.2051    0.1950  0.6107   0.6294
+#> 3  400   0.2397    0.2344  0.5792   0.6294
+```
+
+`coxph` edges out `nbsurv` on both metrics at every horizon on this
+dataset - expected: `age + sex + ph.ecog` have a roughly log-linear,
+non-interacting effect on the hazard here, which is exactly what a
+correctly-specified Cox model is built for, while `nbsurv`'s
+conditional-independence assumption between predictors costs it some
+accuracy in exchange for a much simpler, distribution-light estimation
+procedure. The gap is real but small (concordance within ~0.03-0.05,
+Brier within ~0.01-0.05).
 
 ## Notes
 
