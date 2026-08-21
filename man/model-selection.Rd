@@ -16,7 +16,9 @@ cv_nbsurv(
   time_grid = NULL,
   eps = 1e-06,
   cov_structure = c("diagonal", "full"),
-  shrinkage = 0.2
+  shrinkage = 0.2,
+  time_smooth = FALSE,
+  bandwidth = NULL
 )
 
 evaluate_nbsurv(object, newdata, times, metrics = c("brier", "concordance"), ibs = FALSE)
@@ -46,6 +48,8 @@ tune_nbsurv(
   \item{eps}{Small numerical constant used in probability clipping and IPCW calculations.}
   \item{cov_structure}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
   \item{shrinkage}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
+  \item{time_smooth}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
+  \item{bandwidth}{Passed to each fold's \code{\link{nbsurv}} fit; see there.}
   \item{object}{A fitted \code{"nbsurv"} model.}
   \item{newdata}{Evaluation data containing the same outcome and predictors as the training formula.}
   \item{metrics}{Performance metrics to compute. One or both of \code{"brier"} and \code{"concordance"}.}

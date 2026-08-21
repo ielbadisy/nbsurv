@@ -6,7 +6,9 @@ nbsurv <- function(formula,
                    time_grid = NULL,
                    eps = 1e-06,
                    cov_structure = c("diagonal", "full"),
-                   shrinkage = 0.2) {
+                   shrinkage = 0.2,
+                   time_smooth = FALSE,
+                   bandwidth = NULL) {
   cov_structure <- match.arg(cov_structure)
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.omit)
   y <- stats::model.response(mf)
@@ -58,11 +60,35 @@ nbsurv <- function(formula,
     eps = eps,
     time_grid = time_grid,
     cov_structure = cov_structure,
-    shrinkage = shrinkage
+    shrinkage = shrinkage,
+    time_smooth = time_smooth,
+    bandwidth = bandwidth
   )
+
+  if (time_smooth) {
+    if (is.null(bandwidth)) {
+      bandwidth <- default_bandwidth(time_grid)
+      object$bandwidth <- bandwidth
+    }
+    cat_vars <- names(feature_info[feature_info == "categorical"])
+    object$grid_stats <- build_grid_stats(object, cont_vars, cat_vars)
+  }
 
   class(object) <- "nbsurv"
   object
+}
+
+default_bandwidth <- function(time_grid) {
+  span <- diff(range(time_grid))
+  if (!is.finite(span) || span <= 0) {
+    return(1)
+  }
+  # Empirically (see tests/testthat/test-time-smooth.R and NEWS.md), a
+  # narrower bandwidth trades ranking robustness for calibration at
+  # extreme horizons and vice versa; span / 4 is a reasonable default
+  # balance, not a universally optimal choice - tune via tune_nbsurv()'s
+  # bandwidth column for a given dataset.
+  span / 4
 }
 
 cv_nbsurv <- function(formula,
@@ -76,7 +102,9 @@ cv_nbsurv <- function(formula,
                       time_grid = NULL,
                       eps = 1e-06,
                       cov_structure = c("diagonal", "full"),
-                      shrinkage = 0.2) {
+                      shrinkage = 0.2,
+                      time_smooth = FALSE,
+                      bandwidth = NULL) {
   cov_structure <- match.arg(cov_structure)
   mf <- stats::model.frame(formula, data = data, na.action = stats::na.omit)
   data_complete <- data[rownames(mf), , drop = FALSE]
@@ -103,7 +131,9 @@ cv_nbsurv <- function(formula,
         time_grid = time_grid,
         eps = eps,
         cov_structure = cov_structure,
-        shrinkage = shrinkage
+        shrinkage = shrinkage,
+        time_smooth = time_smooth,
+        bandwidth = bandwidth
       )
 
       metrics <- evaluate_nbsurv(fit, newdata = test, times = eval_times)
@@ -242,6 +272,9 @@ tune_nbsurv <- function(formula,
     rbind,
     lapply(seq_len(nrow(param_grid)), function(i) {
       params <- as.list(param_grid[i, , drop = FALSE])
+      grid_get <- function(name, default) {
+        if (is.null(params[[name]]) || is.na(params[[name]])) default else params[[name]]
+      }
       cv_fit <- cv_nbsurv(
         formula = formula,
         data = data,
@@ -252,7 +285,11 @@ tune_nbsurv <- function(formula,
         laplace = params$laplace,
         min_sd = params$min_sd,
         time_grid = params$time_grid[[1]],
-        eps = eps
+        eps = eps,
+        cov_structure = grid_get("cov_structure", "diagonal"),
+        shrinkage = grid_get("shrinkage", 0.2),
+        time_smooth = grid_get("time_smooth", FALSE),
+        bandwidth = if (is.null(params$bandwidth) || is.na(params$bandwidth)) NULL else params$bandwidth
       )
 
       data.frame(
@@ -296,25 +333,37 @@ predict.nbsurv <- function(object,
   train_x <- object$training_data
   cont_vars <- names(object$feature_info[object$feature_info == "continuous"])
   cat_vars <- names(object$feature_info[object$feature_info == "categorical"])
+  has_smooth <- !is.null(object$grid_stats)
 
   for (j in seq_along(times)) {
     horizon <- times[j]
     prior_surv <- clip_prob(object$event_survival(horizon), object$eps)
-    event_weights <- event_case_weights(object, horizon)
-    survivor_index <- object$times >= horizon
 
     log_surv <- rep(log(prior_surv), nrow(new_x))
     log_event <- rep(log1p(-prior_surv), nrow(new_x))
 
+    if (has_smooth) {
+      cont_stats <- if (length(cont_vars) > 0L) {
+        smoothed_continuous_stats(object$grid_stats, horizon, object$bandwidth)
+      } else {
+        NULL
+      }
+    } else {
+      event_weights <- event_case_weights(object, horizon)
+      survivor_index <- object$times >= horizon
+    }
+
     if (length(cont_vars) > 0L) {
-      cont_stats <- continuous_statistics(
-        train_x = train_x[, cont_vars, drop = FALSE],
-        event_weights = event_weights,
-        survivor_index = survivor_index,
-        min_sd = object$min_sd,
-        cov_structure = if (is.null(object$cov_structure)) "diagonal" else object$cov_structure,
-        shrinkage = if (is.null(object$shrinkage)) 0.2 else object$shrinkage
-      )
+      if (!has_smooth) {
+        cont_stats <- continuous_statistics(
+          train_x = train_x[, cont_vars, drop = FALSE],
+          event_weights = event_weights,
+          survivor_index = survivor_index,
+          min_sd = object$min_sd,
+          cov_structure = if (is.null(object$cov_structure)) "diagonal" else object$cov_structure,
+          shrinkage = if (is.null(object$shrinkage)) 0.2 else object$shrinkage
+        )
+      }
 
       if (!is.null(cont_stats)) {
         new_cont <- as.matrix(new_x[, cont_vars, drop = FALSE])
@@ -346,12 +395,16 @@ predict.nbsurv <- function(object,
 
     if (length(cat_vars) > 0L) {
       for (var in cat_vars) {
-        cat_probs <- categorical_statistics(
-          values = train_x[[var]],
-          event_weights = event_weights,
-          survivor_index = survivor_index,
-          laplace = object$laplace
-        )
+        cat_probs <- if (has_smooth) {
+          smoothed_categorical_probs(object$grid_stats, var, horizon, object$bandwidth)
+        } else {
+          categorical_statistics(
+            values = train_x[[var]],
+            event_weights = event_weights,
+            survivor_index = survivor_index,
+            laplace = object$laplace
+          )
+        }
         new_values <- as.character(new_x[[var]])
         log_surv <- log_surv + log(clip_prob(unname(cat_probs$survivor[new_values]), object$eps))
         log_event <- log_event + log(clip_prob(unname(cat_probs$event[new_values]), object$eps))
@@ -384,6 +437,9 @@ print.nbsurv <- function(x, ...) {
   cat("Predictors:", paste(names(x$feature_info), collapse = ", "), "\n")
   cat("Prediction grid size:", length(x$time_grid), "\n")
   cat("Covariance structure:", if (is.null(x$cov_structure)) "diagonal" else x$cov_structure, "\n")
+  if (isTRUE(x$time_smooth)) {
+    cat("Time smoothing: kernel bandwidth =", signif(x$bandwidth, 4), "\n")
+  }
   invisible(x)
 }
 
@@ -528,6 +584,121 @@ continuous_statistics <- function(train_x, event_weights, survivor_index, min_sd
   }
 
   out
+}
+
+build_grid_stats <- function(object, cont_vars, cat_vars) {
+  grid <- object$time_grid
+  K <- length(grid)
+  train_x <- object$training_data
+
+  event_mean <- survivor_mean <- event_sd <- survivor_sd <-
+    matrix(NA_real_, K, length(cont_vars), dimnames = list(NULL, cont_vars))
+  event_cov <- vector("list", K)
+  survivor_cov <- vector("list", K)
+
+  cat_event <- vector("list", length(cat_vars))
+  cat_survivor <- vector("list", length(cat_vars))
+  names(cat_event) <- names(cat_survivor) <- cat_vars
+  for (v in cat_vars) {
+    levels_v <- levels(train_x[[v]])
+    cat_event[[v]] <- matrix(NA_real_, K, length(levels_v), dimnames = list(NULL, levels_v))
+    cat_survivor[[v]] <- cat_event[[v]]
+  }
+
+  for (k in seq_len(K)) {
+    horizon <- grid[k]
+    event_weights <- event_case_weights(object, horizon)
+    survivor_index <- object$times >= horizon
+
+    if (length(cont_vars) > 0L) {
+      cs <- continuous_statistics(
+        train_x[, cont_vars, drop = FALSE], event_weights, survivor_index,
+        object$min_sd, cov_structure = object$cov_structure, shrinkage = object$shrinkage
+      )
+      if (!is.null(cs)) {
+        event_mean[k, ] <- cs$event_mean
+        event_sd[k, ] <- cs$event_sd
+        survivor_mean[k, ] <- cs$survivor_mean
+        survivor_sd[k, ] <- cs$survivor_sd
+        if (!is.null(cs$event_cov)) {
+          event_cov[[k]] <- cs$event_cov
+          survivor_cov[[k]] <- cs$survivor_cov
+        }
+      }
+    }
+
+    for (v in cat_vars) {
+      cst <- categorical_statistics(train_x[[v]], event_weights, survivor_index, object$laplace)
+      cat_event[[v]][k, ] <- cst$event
+      cat_survivor[[v]][k, ] <- cst$survivor
+    }
+  }
+
+  list(
+    grid = grid,
+    event_mean = event_mean, event_sd = event_sd,
+    survivor_mean = survivor_mean, survivor_sd = survivor_sd,
+    event_cov = event_cov, survivor_cov = survivor_cov,
+    cat_event = cat_event, cat_survivor = cat_survivor
+  )
+}
+
+kernel_weights <- function(grid, horizon, bandwidth) {
+  exp(-0.5 * ((grid - horizon) / bandwidth) ^ 2)
+}
+
+nw_smooth_matrix <- function(values_matrix, grid, horizon, bandwidth) {
+  w <- kernel_weights(grid, horizon, bandwidth)
+  valid <- stats::complete.cases(values_matrix)
+  w[!valid] <- 0
+  if (sum(w) <= 0) {
+    nearest <- which(valid)[which.min(abs(grid[valid] - horizon))]
+    return(values_matrix[nearest, ])
+  }
+  values_matrix[!valid, ] <- 0  # NA rows carry zero weight; 0 * NA is still NA in R, so zero the values too
+  colSums(values_matrix * w) / sum(w)
+}
+
+nw_smooth_matrix_list <- function(mat_list, grid, horizon, bandwidth) {
+  w <- kernel_weights(grid, horizon, bandwidth)
+  valid <- !vapply(mat_list, is.null, logical(1))
+  w[!valid] <- 0
+  if (sum(w) <= 0) {
+    nearest <- which(valid)[which.min(abs(grid[valid] - horizon))]
+    return(mat_list[[nearest]])
+  }
+  w <- w / sum(w)
+  acc <- mat_list[[which(valid)[1]]] * 0
+  for (k in which(valid)) {
+    acc <- acc + mat_list[[k]] * w[k]
+  }
+  acc
+}
+
+smoothed_continuous_stats <- function(grid_stats, horizon, bandwidth) {
+  list(
+    event_mean = nw_smooth_matrix(grid_stats$event_mean, grid_stats$grid, horizon, bandwidth),
+    event_sd = nw_smooth_matrix(grid_stats$event_sd, grid_stats$grid, horizon, bandwidth),
+    survivor_mean = nw_smooth_matrix(grid_stats$survivor_mean, grid_stats$grid, horizon, bandwidth),
+    survivor_sd = nw_smooth_matrix(grid_stats$survivor_sd, grid_stats$grid, horizon, bandwidth),
+    event_cov = if (any(!vapply(grid_stats$event_cov, is.null, logical(1)))) {
+      nw_smooth_matrix_list(grid_stats$event_cov, grid_stats$grid, horizon, bandwidth)
+    } else {
+      NULL
+    },
+    survivor_cov = if (any(!vapply(grid_stats$survivor_cov, is.null, logical(1)))) {
+      nw_smooth_matrix_list(grid_stats$survivor_cov, grid_stats$grid, horizon, bandwidth)
+    } else {
+      NULL
+    }
+  )
+}
+
+smoothed_categorical_probs <- function(grid_stats, var, horizon, bandwidth) {
+  list(
+    event = nw_smooth_matrix(grid_stats$cat_event[[var]], grid_stats$grid, horizon, bandwidth),
+    survivor = nw_smooth_matrix(grid_stats$cat_survivor[[var]], grid_stats$grid, horizon, bandwidth)
+  )
 }
 
 weighted_cov <- function(x, w, mean) {
