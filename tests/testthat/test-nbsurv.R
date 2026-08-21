@@ -1,34 +1,3 @@
-make_lung_data <- function() {
-  lung <- survival::lung
-  lung$status <- as.integer(lung$status == 2)
-  lung$sex <- factor(lung$sex)
-  lung
-}
-
-simulate_nbsurv_data <- function(n = 250, censor_rate = 0.2, seed = 1) {
-  set.seed(seed)
-
-  z <- rbinom(n, size = 1, prob = 0.45)
-  x1 <- rnorm(n, mean = z * 0.5, sd = ifelse(z == 1, 1.8, 0.9))
-  x2 <- rnorm(n, mean = 0, sd = ifelse(z == 1, 1.5, 0.7))
-  grp <- factor(ifelse(z == 1, sample(c("A", "B"), n, TRUE, c(0.3, 0.7)), sample(c("A", "B"), n, TRUE, c(0.7, 0.3))))
-
-  true_time <- ifelse(
-    z == 1,
-    rweibull(n, shape = 1.4, scale = 2.8),
-    rweibull(n, shape = 1.4, scale = 6.5)
-  )
-  censor_time <- rexp(n, rate = censor_rate)
-
-  data.frame(
-    time = pmin(true_time, censor_time),
-    status = as.integer(true_time <= censor_time),
-    x1 = x1,
-    x2 = x2,
-    grp = grp
-  )
-}
-
 test_that("nbsurv returns valid monotone survival predictions", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
@@ -173,6 +142,36 @@ test_that("heavy censoring still yields finite predictions and evaluation metric
   expect_true(all(is.finite(preds)))
   expect_true(all(is.finite(metrics$brier)))
   expect_true(all(is.finite(metrics$concordance)))
+})
+
+test_that("evaluate_nbsurv returns finite IBS when ibs = TRUE", {
+  skip_if_not_installed("survival")
+  lung <- make_lung_data()
+
+  train <- lung[1:140, ]
+  test  <- lung[141:nrow(lung), ]
+  fit <- nbsurv(survival::Surv(time, status) ~ age + sex + ph.ecog, data = train)
+
+  res <- evaluate_nbsurv(fit, newdata = test, times = c(150, 300, 450), ibs = TRUE)
+  ibs_val <- attr(res, "ibs")
+
+  expect_true(is.finite(ibs_val))
+  expect_true(ibs_val >= 0 && ibs_val <= 1)
+})
+
+test_that("calibration_plot_nbsurv returns a data frame and plots without error", {
+  skip_if_not_installed("survival")
+  lung <- make_lung_data()
+  fit <- nbsurv(survival::Surv(time, status) ~ age + sex, data = lung)
+
+  grDevices::pdf(file = tempfile(fileext = ".pdf"))
+  on.exit(grDevices::dev.off(), add = TRUE)
+  calib <- calibration_plot_nbsurv(fit, newdata = lung, horizon = 300)
+
+  expect_s3_class(calib, "data.frame")
+  expect_true(all(c("mean_pred", "observed", "n") %in% names(calib)))
+  expect_true(all(is.finite(calib$mean_pred)))
+  expect_true(all(is.finite(calib$observed)))
 })
 
 test_that("print and plot methods execute without error", {

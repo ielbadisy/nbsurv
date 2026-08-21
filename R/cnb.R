@@ -122,7 +122,8 @@ cv_nbsurv <- function(formula,
 evaluate_nbsurv <- function(object,
                             newdata,
                             times,
-                            metrics = c("brier", "concordance")) {
+                            metrics = c("brier", "concordance"),
+                            ibs = FALSE) {
   metrics <- unique(match.arg(metrics, choices = c("brier", "concordance"), several.ok = TRUE))
   times <- validate_prediction_times(times)
 
@@ -160,7 +161,53 @@ evaluate_nbsurv <- function(object,
     )
   }
 
+  if (ibs && "brier" %in% metrics && length(times) > 1L) {
+    attr(results, "ibs") <- integrated_brier_score(results$brier, times)
+  }
+
   results
+}
+
+calibration_plot_nbsurv <- function(object, newdata, horizon, n_groups = 10, ...) {
+  times <- validate_prediction_times(horizon)
+  if (length(times) != 1L) {
+    stop("`horizon` must be a single prediction time.")
+  }
+
+  mf <- stats::model.frame(object$formula, data = newdata, na.action = stats::na.fail)
+  y <- stats::model.response(mf)
+  validate_surv_response(y)
+
+  pred_event <- as.numeric(predict(object, newdata = mf, times = times, type = "event")[, 1L])
+  obs_time <- y[, "time"]
+  obs_status <- y[, "status"]
+
+  breaks <- unique(stats::quantile(pred_event, probs = seq(0, 1, length.out = n_groups + 1L), names = FALSE))
+  if (length(breaks) < 3L) {
+    stop("Too few unique predicted values to form calibration groups.")
+  }
+  grp <- base::findInterval(pred_event, breaks, rightmost.closed = TRUE)
+
+  calib <- do.call(rbind, lapply(sort(unique(grp)), function(g) {
+    idx <- grp == g
+    km <- survival::survfit(survival::Surv(obs_time[idx], obs_status[idx]) ~ 1)
+    s_hat <- summary(km, times = times[1L], extend = TRUE)$surv
+    if (!length(s_hat)) s_hat <- 1
+    data.frame(
+      mean_pred = mean(pred_event[idx]),
+      observed  = 1 - s_hat,
+      n         = sum(idx)
+    )
+  }))
+
+  graphics::plot(
+    calib$mean_pred, calib$observed,
+    xlab = "Mean predicted event probability",
+    ylab = "Observed event probability (1 - KM)",
+    pch = 16, xlim = c(0, 1), ylim = c(0, 1), ...
+  )
+  graphics::abline(0, 1, lty = 2)
+  invisible(calib)
 }
 
 tune_nbsurv <- function(formula,
@@ -557,6 +604,15 @@ concordance_at_horizon <- function(time, status, risk) {
   as.numeric(out)
 }
 
+integrated_brier_score <- function(brier, times) {
+  ord <- order(times)
+  t <- times[ord]
+  b <- brier[ord]
+  tau <- t[length(t)] - t[1L]
+  if (tau <= 0) return(NA_real_)
+  sum(diff(t) * (b[-length(b)] + b[-1L]) / 2) / tau
+}
+
 validate_param_grid <- function(param_grid) {
   if (!is.data.frame(param_grid) || !nrow(param_grid)) {
     stop("`param_grid` must be a non-empty data.frame.")
@@ -573,4 +629,111 @@ validate_param_grid <- function(param_grid) {
   }
 
   invisible(param_grid)
+}
+
+varimp_nbsurv <- function(object,
+                          newdata,
+                          times,
+                          metric = c("brier", "concordance"),
+                          n_repeats = 10,
+                          seed = NULL) {
+  metric <- match.arg(metric)
+  if (!is.numeric(n_repeats) || length(n_repeats) != 1L || n_repeats < 1L) {
+    stop("`n_repeats` must be a positive integer.")
+  }
+  n_repeats <- as.integer(n_repeats)
+  if (!is.null(seed)) {
+    set.seed(seed)
+  }
+
+  feature_names <- names(object$feature_info)
+  n <- nrow(newdata)
+
+  baseline <- evaluate_nbsurv(object, newdata = newdata, times = times, metrics = metric)
+  baseline_value <- mean(baseline[[metric]])
+
+  importance <- vapply(feature_names, function(feature) {
+    permuted_values <- vapply(seq_len(n_repeats), function(rep) {
+      permuted <- newdata
+      permuted[[feature]] <- permuted[[feature]][sample.int(n)]
+      result <- tryCatch(
+        evaluate_nbsurv(object, newdata = permuted, times = times, metrics = metric),
+        error = function(e) NULL
+      )
+      if (is.null(result)) NA_real_ else mean(result[[metric]])
+    }, numeric(1))
+    mean(permuted_values, na.rm = TRUE)
+  }, numeric(1))
+
+  score <- if (metric == "brier") {
+    importance - baseline_value
+  } else {
+    baseline_value - importance
+  }
+
+  out <- data.frame(
+    feature = feature_names,
+    baseline = baseline_value,
+    permuted = as.numeric(importance),
+    importance = as.numeric(score),
+    row.names = NULL
+  )
+  out <- out[order(out$importance, decreasing = TRUE), , drop = FALSE]
+  attr(out, "metric") <- metric
+  attr(out, "n_repeats") <- n_repeats
+  class(out) <- c("varimp_nbsurv", "data.frame")
+  out
+}
+
+print.varimp_nbsurv <- function(x, ...) {
+  cat("nbsurv permutation variable importance\n")
+  cat("Metric:", attr(x, "metric"), "| repeats:", attr(x, "n_repeats"), "\n\n")
+  print.data.frame(x, row.names = FALSE)
+  invisible(x)
+}
+
+plot.varimp_nbsurv <- function(x, ...) {
+  ord <- order(x$importance)
+  graphics::barplot(
+    height = x$importance[ord],
+    names.arg = x$feature[ord],
+    horiz = TRUE,
+    las = 1,
+    xlab = paste0("Importance (", attr(x, "metric"), " degradation)"),
+    ...
+  )
+  invisible(x)
+}
+
+plot.cv_nbsurv <- function(x, metric = c("brier", "concordance"), ...) {
+  metric <- match.arg(metric)
+  graphics::matplot(
+    x = x$summary$time,
+    y = x$summary[[metric]],
+    type = "b",
+    pch = 19,
+    lty = 1,
+    lwd = 2,
+    xlab = "Time",
+    ylab = paste("Mean", metric, "across folds"),
+    ...
+  )
+  invisible(x)
+}
+
+plot.tune_nbsurv <- function(x, ...) {
+  values <- x$results$mean_metric
+  cols <- rep("black", length(values))
+  cols[x$best_index] <- "firebrick"
+  graphics::plot(
+    x = seq_along(values),
+    y = values,
+    pch = 19,
+    col = cols,
+    xlab = "Candidate",
+    ylab = paste("Mean", x$metric),
+    ...
+  )
+  graphics::points(x$best_index, values[x$best_index], pch = 1, cex = 2, col = "firebrick")
+  invisible(x)
 }

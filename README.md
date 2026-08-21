@@ -1,10 +1,15 @@
 # nbsurv
 
+<!-- badges: start -->
+[![R-CMD-check](https://github.com/ielbadisy/nbsurv/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/ielbadisy/nbsurv/actions/workflows/R-CMD-check.yaml)
+[![License: GPL-3](https://img.shields.io/badge/License-GPL--3-yellow.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<!-- badges: end -->
+
 `nbsurv` fits conditional naive Bayes survival models for right-censored
 time-to-event data. The package focuses on horizon-specific survival
 prediction with inverse-probability of censoring weighting, and includes
-tools for model fitting, prediction, evaluation, cross-validation, and
-hyper-parameter tuning.
+tools for model fitting, prediction, evaluation, cross-validation,
+hyper-parameter tuning, and permutation variable importance.
 
 ## Main workflow
 

@@ -1,6 +1,12 @@
 ^research$
-^\\.Rhistory$
-^\\.Rproj\\.user$
-^\\.\\.?Rcheck$
-^inst/benchmarks/\\.Rhistory$
-^nbsurv_.*\\.tar\\.gz$
+^\.Rhistory$
+^\.Rproj\.user$
+^\.\.?Rcheck$
+^inst/benchmarks/\.Rhistory$
+^nbsurv_.*\.tar\.gz$
+^nbsurv[.]Rproj$
+^cran-comments[.]md$
+^Rplots[.]pdf$
+^\.git$
+^\.github$
+^\.claude$
