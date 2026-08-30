@@ -1,13 +1,19 @@
 Package: nbsurv
 Type: Package
 Title: Conditional Naive Bayes Survival Modelling for Right-Censored Data
-Version: 0.5.0
+Version: 0.5.1
 Authors@R: person("Imad", "El Badisy", email = "elbadisyimad@gmail.com", role = c("aut", "cre"))
 Description: Fits conditional naive Bayes survival models for right-censored
     outcomes using inverse-probability of censoring weighting. The package
     provides model fitting, prediction, resampling-based evaluation,
     cross-validation, hyper-parameter tuning, and permutation variable
-    importance utilities for horizon-specific survival prediction.
+    importance utilities for horizon-specific survival prediction. The
+    model is the censored naive Bayes classifier of Wolfson et al. (2015)
+    <doi:10.1002/sim.6526>, which combines the marginal Kaplan-Meier
+    survivor function with horizon-specific class-conditional covariate
+    densities and inverse-probability-of-censoring weights. Resampling
+    evaluation uses the inverse-probability-of-censoring-weighted Brier
+    score of Gerds and Schumacher (2006) <doi:10.1002/bimj.200610301>.
 License: GPL-3
 Encoding: UTF-8
 Depends: 

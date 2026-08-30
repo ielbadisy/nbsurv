@@ -1,3 +1,14 @@
+# nbsurv 0.5.1
+
+## CRAN resubmission
+
+* `DESCRIPTION`: added method references to the `Description` field -
+  Wolfson et al. (2015) <doi:10.1002/sim.6526> for the censored naive
+  Bayes model, and Gerds and Schumacher (2006) <doi:10.1002/bimj.200610301>
+  for the IPCW Brier score used in evaluation.
+* `man/nbsurv-class.Rd`: added a `\value` section documenting the return
+  values of the `print()` and `plot()` methods for `"nbsurv"` objects.
+
 # nbsurv 0.5.0
 
 ## New features: kernel-smoothed horizons (`time_smooth`)
