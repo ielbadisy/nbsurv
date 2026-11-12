@@ -377,14 +377,14 @@ predict.nbsurv <- function(object,
             new_cont, cont_stats$event_mean, cont_stats$event_cov
           )
         } else {
-          log_surv <- log_surv + rowSums(stats::dnorm(
-            x = new_cont,
+          log_surv <- log_surv + colSums(stats::dnorm(
+            x = t(new_cont),
             mean = cont_stats$survivor_mean,
             sd = cont_stats$survivor_sd,
             log = TRUE
           ))
-          log_event <- log_event + rowSums(stats::dnorm(
-            x = new_cont,
+          log_event <- log_event + colSums(stats::dnorm(
+            x = t(new_cont),
             mean = cont_stats$event_mean,
             sd = cont_stats$event_sd,
             log = TRUE
