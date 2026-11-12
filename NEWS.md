@@ -1,3 +1,7 @@
+# nbsurv 0.5.2
+
+* Fixed `predict()` for several rows with two or more continuous predictors under the diagonal covariance structure: the per-variable means and SDs were recycled down columns instead of across rows, so batch predictions differed from row-by-row predictions. This also affected `evaluate_nbsurv()` and `cv_nbsurv()`.
+
 # nbsurv 0.5.1
 
 ## CRAN resubmission
