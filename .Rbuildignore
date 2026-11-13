@@ -10,3 +10,5 @@
 ^\.git$
 ^\.github$
 ^\.claude$
+^README\.Rmd$
+^archive$
