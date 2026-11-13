@@ -1,3 +1,7 @@
+# nbsurv 0.5.4
+
+* Added `README.Rmd`; `README.md` is now generated from it with `devtools::build_readme()`.
+
 # nbsurv 0.5.3
 
 * Exported functions are renamed to glued lowercase. The old names remain as deprecated wrappers for one release. S3 class names are unchanged.
