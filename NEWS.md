@@ -1,3 +1,15 @@
+# nbsurv 0.5.3
+
+* Exported functions are renamed to glued lowercase. The old names remain as deprecated wrappers for one release. S3 class names are unchanged.
+
+| Old | New |
+|---|---|
+| `calibration_plot_nbsurv()` | `calibrationplotnbsurv()` |
+| `cv_nbsurv()` | `cvnbsurv()` |
+| `evaluate_nbsurv()` | `evaluatenbsurv()` |
+| `tune_nbsurv()` | `tunenbsurv()` |
+| `varimp_nbsurv()` | `varimpnbsurv()` |
+
 # nbsurv 0.5.2
 
 * Fixed `predict()` for several rows with two or more continuous predictors under the diagonal covariance structure: the per-variable means and SDs were recycled down columns instead of across rows, so batch predictions differed from row-by-row predictions. This also affected `evaluate_nbsurv()` and `cv_nbsurv()`.

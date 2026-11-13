@@ -1,3 +1,67 @@
+#' Fit a Conditional Naive Bayes Survival Model
+#'
+#' Fits a conditional naive Bayes model for right-censored survival data.
+#' The model combines the marginal Kaplan-Meier survival estimate with
+#' horizon-specific likelihood terms estimated among subjects who fail
+#' before the horizon and subjects known to survive beyond it.
+#'
+#' @param formula A model formula with a \code{survival::Surv()} response.
+#' @param data A data frame containing the outcome and predictors.
+#' @param scale Logical; if \code{TRUE}, continuous predictors are standardized.
+#' @param laplace Laplace smoothing constant for categorical likelihoods.
+#' @param min_sd Lower bound used for Gaussian standard deviations.
+#' @param time_grid Optional numeric vector of prediction horizons stored with the fit.
+#' @param eps Small numerical constant used to clip probabilities away from 0 and 1.
+#' @param cov_structure \code{"diagonal"} (default): continuous predictors are modeled as
+#' conditionally independent (the classic naive Bayes assumption), each with its own
+#' class-conditional Gaussian. \code{"full"}: continuous predictors are modeled jointly as a
+#' single multivariate Gaussian per class (with covariance shrunk toward diagonal by
+#' \code{shrinkage}), relaxing the independence assumption between them. Categorical
+#' predictors are always treated as conditionally independent regardless of this setting.
+#' Requires 2+ continuous predictors to have any effect; with only one, \code{"full"} is
+#' numerically identical to \code{"diagonal"}. Empirically improves the IPCW Brier score
+#' (calibration) when continuous predictors are correlated, with a smaller and less
+#' consistent effect on concordance (ranking) - see \code{vignette("nbsurv-workflow")}.
+#' @param shrinkage Shrinkage weight toward the diagonal covariance, in `[0, 1]`, used only
+#' when \code{cov_structure = "full"}. `0` uses the raw sample covariance (more variance,
+#' especially at small `n`); `1` is equivalent to `"diagonal"`. Default `0.2`.
+#' @param time_smooth Logical, default \code{FALSE}. If \code{TRUE}, class-conditional
+#' statistics (means, covariances, categorical probabilities) are estimated once at every
+#' point of \code{time_grid} at fit time, then combined across horizons via Nadaraya-Watson
+#' kernel regression (Gaussian kernel, width \code{bandwidth}) when \code{predict()} is
+#' called at a given horizon, instead of being re-estimated from scratch, independently, at
+#' each requested horizon. This borrows statistical strength from neighboring horizons,
+#' reducing estimation variance where one of the two horizon-defined classes (subjects who
+#' already failed vs. subjects known to survive past it) is sparse - typically near the
+#' earliest or latest horizons requested - while still allowing genuinely time-varying
+#' effects (unlike a proportional-hazards model, which shares a single coefficient across
+#' all of time). A convex (weight-normalized) combination of the per-grid-point statistics
+#' is used, so smoothed covariance matrices stay positive semi-definite and smoothed
+#' categorical probabilities stay valid automatically, with no extra correction needed.
+#' Increases fit time (every grid point's statistics are computed once, up front) but not
+#' predict time. Empirically (see `NEWS.md`) trades ranking robustness (concordance) for
+#' calibration at extreme horizons as `bandwidth` widens, and vice versa as it narrows -
+#' tune `bandwidth` via \code{\link{tunenbsurv}} rather than relying on the default for a
+#' specific dataset.
+#' @param bandwidth Kernel bandwidth (in the same units as \code{time}), used only when
+#' \code{time_smooth = TRUE}. Defaults to one quarter of the fitted \code{time_grid}'s range
+#' when \code{NULL}.
+#' @return An object of class \code{"nbsurv"}.
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(
+#'   Surv(time, status) ~ age + sex,
+#'   data = lung
+#' )
+#'
+#' predict(fit, newdata = lung[1:3, ], times = c(100, 200, 300))
+#'
+#'
+#' @export
+#' @rdname nbsurv
 nbsurv <- function(formula,
                    data,
                    scale = TRUE,
@@ -86,12 +150,65 @@ default_bandwidth <- function(time_grid) {
   # Empirically (see tests/testthat/test-time-smooth.R and NEWS.md), a
   # narrower bandwidth trades ranking robustness for calibration at
   # extreme horizons and vice versa; span / 4 is a reasonable default
-  # balance, not a universally optimal choice - tune via tune_nbsurv()'s
+  # balance, not a universally optimal choice - tune via tunenbsurv()'s
   # bandwidth column for a given dataset.
   span / 4
 }
 
-cv_nbsurv <- function(formula,
+#' Evaluate, Cross-Validate, and Tune nbsurv Models
+#'
+#' Provides resampling-based utilities for evaluating, cross-validating, and
+#' tuning \code{nbsurv} survival models using horizon-specific Brier score,
+#' integrated Brier score (IBS), and concordance.
+#'
+#' The integrated Brier score summarises calibration over a range of horizons:
+#' \deqn{
+#'   \mathrm{IBS} = \frac{1}{\tau - t_1} \int_{t_1}^{\tau} \mathrm{BS}(t)\, dt
+#' }
+#' approximated by the trapezoidal rule over the supplied \code{times}.
+#'
+#' @param formula A model formula with a \code{survival::Surv()} response.
+#' @param data A data frame containing outcome and predictors.
+#' @param folds Number of cross-validation folds.
+#' @param times Prediction horizons to evaluate. If \code{NULL}, event-time quantiles are used.
+#' @param seed Optional random seed for reproducible fold assignment.
+#' @param scale Logical; if \code{TRUE}, continuous predictors are standardized.
+#' @param laplace Laplace smoothing constant for categorical likelihoods.
+#' @param min_sd Lower bound used for Gaussian standard deviations.
+#' @param time_grid Optional prediction grid stored with each fitted model.
+#' @param eps Small numerical constant used in probability clipping and IPCW calculations.
+#' @param cov_structure Passed to each fold's \code{\link{nbsurv}} fit; see there.
+#' @param shrinkage Passed to each fold's \code{\link{nbsurv}} fit; see there.
+#' @param time_smooth Passed to each fold's \code{\link{nbsurv}} fit; see there.
+#' @param bandwidth Passed to each fold's \code{\link{nbsurv}} fit; see there.
+#' @param object A fitted \code{"nbsurv"} model.
+#' @param newdata Evaluation data containing the same outcome and predictors as the training formula.
+#' @param metrics Performance metrics to compute. One or both of \code{"brier"} and \code{"concordance"}.
+#' @param ibs Logical; if \code{TRUE} and \code{"brier"} is in \code{metrics}, the integrated Brier score
+#' (trapezoidal rule over \code{times}) is attached as \code{attr(result, "ibs")}.
+#' @param param_grid A data frame with columns \code{scale}, \code{laplace}, \code{min_sd}, and \code{time_grid}.
+#' @param metric The metric used to choose the best hyper-parameter setting.
+#' @param maximize Logical; if \code{TRUE}, larger metric values are preferred.
+#' @return \code{evaluatenbsurv()} returns a data frame of horizon-specific metrics. When
+#' \code{ibs = TRUE} the integrated Brier score is attached via \code{attr(result, "ibs")}.
+#' \code{cvnbsurv()} returns a list with fold-level and mean cross-validation summaries.
+#' \code{tunenbsurv()} returns a list with all candidate results and the best row.
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(Surv(time, status) ~ age + sex, data = lung)
+#' res <- evaluatenbsurv(fit, newdata = lung[1:50, ], times = c(100, 200, 400), ibs = TRUE)
+#' res
+#' attr(res, "ibs")
+#'
+#' cvnbsurv(Surv(time, status) ~ age + sex, data = lung, folds = 3, times = c(100, 200))
+#'
+#'
+#' @export
+#' @rdname model-selection
+cvnbsurv <- function(formula,
                       data,
                       folds = 5,
                       times = NULL,
@@ -136,7 +253,7 @@ cv_nbsurv <- function(formula,
         bandwidth = bandwidth
       )
 
-      metrics <- evaluate_nbsurv(fit, newdata = test, times = eval_times)
+      metrics <- evaluatenbsurv(fit, newdata = test, times = eval_times)
       metrics$fold <- fold
       metrics
     })
@@ -161,7 +278,9 @@ cv_nbsurv <- function(formula,
   out
 }
 
-evaluate_nbsurv <- function(object,
+#' @rdname model-selection
+#' @export
+evaluatenbsurv <- function(object,
                             newdata,
                             times,
                             metrics = c("brier", "concordance"),
@@ -210,7 +329,34 @@ evaluate_nbsurv <- function(object,
   results
 }
 
-calibration_plot_nbsurv <- function(object, newdata, horizon, n_groups = 10, ...) {
+#' Calibration Plot for a nbsurv Model
+#'
+#' Assesses calibration of a \code{nbsurv} model at a single prediction horizon
+#' by grouping observations into quantile bins of predicted event probability and
+#' comparing the group mean prediction against the Kaplan-Meier observed event
+#' probability within each bin.
+#'
+#' @param object A fitted \code{"nbsurv"} model.
+#' @param newdata A data frame containing the outcome and predictors.
+#' @param horizon A single numeric prediction horizon.
+#' @param n_groups Number of quantile-based calibration groups.
+#' @param ... Additional graphical arguments passed to \code{plot()}.
+#' @return Invisibly returns a data frame with columns \code{mean_pred} (mean predicted
+#' event probability per group), \code{observed} (observed event probability from
+#' Kaplan-Meier), and \code{n} (group size). The calibration plot is drawn as a
+#' side effect.
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(Surv(time, status) ~ age + sex, data = lung)
+#' calibrationplotnbsurv(fit, newdata = lung, horizon = 300)
+#'
+#'
+#' @export
+#' @rdname calibration-plot
+calibrationplotnbsurv <- function(object, newdata, horizon, n_groups = 10, ...) {
   times <- validate_prediction_times(horizon)
   if (length(times) != 1L) {
     stop("`horizon` must be a single prediction time.")
@@ -252,7 +398,9 @@ calibration_plot_nbsurv <- function(object, newdata, horizon, n_groups = 10, ...
   invisible(calib)
 }
 
-tune_nbsurv <- function(formula,
+#' @rdname model-selection
+#' @export
+tunenbsurv <- function(formula,
                         data,
                         param_grid,
                         folds = 5,
@@ -275,7 +423,7 @@ tune_nbsurv <- function(formula,
       grid_get <- function(name, default) {
         if (is.null(params[[name]]) || is.na(params[[name]])) default else params[[name]]
       }
-      cv_fit <- cv_nbsurv(
+      cv_fit <- cvnbsurv(
         formula = formula,
         data = data,
         folds = folds,
@@ -317,6 +465,32 @@ tune_nbsurv <- function(formula,
   out
 }
 
+#' Predict Survival Probabilities from a nbsurv Model
+#'
+#' Computes horizon-specific survival or event probabilities from a fitted
+#' conditional naive Bayes survival model. The returned survival curves are
+#' forced to be non-increasing across increasing time horizons.
+#'
+#' @param object A fitted \code{"nbsurv"} model.
+#' @param newdata A data frame of predictor values.
+#' @param times Numeric vector of prediction horizons.
+#' @param type Either \code{"survival"} for survival probabilities or \code{"event"} for event probabilities.
+#' @param ... Unused additional arguments.
+#' @return A matrix with one row per observation in \code{newdata} and one column per
+#' prediction horizon.
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(Surv(time, status) ~ age + sex, data = lung)
+#' predict(fit, newdata = lung[1:2, ], times = c(100, 200))
+#' predict(fit, newdata = lung[1:2, ], times = c(100, 200), type = "event")
+#'
+#'
+#' @method predict nbsurv
+#' @export
+#' @rdname predict.nbsurv
 predict.nbsurv <- function(object,
                            newdata,
                            times,
@@ -421,14 +595,44 @@ predict.nbsurv <- function(object,
   surv_probs
 }
 
+#' @rdname predict.nbsurv
+#' @export
 predictSurvProb <- function(object, ...) {
   UseMethod("predictSurvProb")
 }
 
+#' @rdname predict.nbsurv
+#' @method predictSurvProb nbsurv
+#' @export
 predictSurvProb.nbsurv <- function(object, newdata, times, ...) {
   predict.nbsurv(object, newdata = newdata, times = times, type = "survival", ...)
 }
 
+#' Conditional Naive Bayes Survival Model Object
+#'
+#' \code{nbsurv} objects are created by \code{\link{nbsurv}} and store the training
+#' data, outcome, feature types, scaling information, and the Kaplan-Meier
+#' estimates required for prediction.
+#'
+#' @param x A fitted \code{"nbsurv"} model object.
+#' @param times Optional vector of horizons used for plotting.
+#' @param n_curves Number of training-set curves to display in the plot method.
+#' @param ... Additional arguments passed to the underlying plotting functions.
+#' @return \code{print.nbsurv} is called for its side effect of printing a concise summary
+#' of the fitted model (formula, number of training rows, predictors, prediction
+#' grid size, covariance structure, and time-smoothing settings) to the console;
+#' it returns its argument \code{x} invisibly.
+#'
+#' \code{plot.nbsurv} is called for its side effect of drawing predicted
+#' survival curves for the first \code{n_curves} training observations over
+#' \code{times}; it returns, invisibly, the matrix of predicted survival
+#' probabilities used for the plot (one row per displayed observation, one column
+#' per element of \code{times}).
+#'
+#'
+#' @method print nbsurv
+#' @export
+#' @rdname nbsurv-class
 print.nbsurv <- function(x, ...) {
   cat("nbsurv conditional naive Bayes model\n")
   cat("Formula: ")
@@ -443,6 +647,9 @@ print.nbsurv <- function(x, ...) {
   invisible(x)
 }
 
+#' @rdname nbsurv-class
+#' @method plot nbsurv
+#' @export
 plot.nbsurv <- function(x, times = NULL, n_curves = 5, ...) {
   if (is.null(times)) {
     times <- x$time_grid
@@ -872,7 +1079,41 @@ validate_param_grid <- function(param_grid) {
   invisible(param_grid)
 }
 
-varimp_nbsurv <- function(object,
+#' Permutation Variable Importance for nbsurv Models
+#'
+#' Computes permutation-based variable importance: for each predictor, its values are independently
+#' shuffled \code{n_repeats} times, \code{\link{evaluatenbsurv}} is recomputed on the permuted data,
+#' and importance is the resulting degradation in the chosen metric, averaged over \code{times} and
+#' repeats. Predictors the model relies on more heavily degrade performance more when permuted.
+#'
+#' @param object A fitted \code{"nbsurv"} model.
+#' @param newdata Evaluation data containing the same outcome and predictors as the training formula.
+#' @param times Prediction horizons averaged over when computing the metric.
+#' @param metric The metric to degrade under permutation. One of \code{"brier"} (higher = worse) or
+#' \code{"concordance"} (higher = better).
+#' @param n_repeats Number of independent permutations per feature; importance is the mean degradation
+#' across repeats.
+#' @param seed Optional random seed for reproducible permutations.
+#' @param x A \code{"varimp_nbsurv"} object.
+#' @param ... Unused additional arguments.
+#' @return A data frame (class \code{"varimp_nbsurv"}) with one row per predictor, sorted by decreasing
+#' importance, with columns \code{feature}, \code{baseline} (the unpermuted metric, averaged over
+#' \code{times}), \code{permuted} (the metric after permuting that feature, averaged over
+#' \code{times} and \code{n_repeats}), and \code{importance} (the degradation: \code{permuted -
+#' baseline} for \code{"brier"}, \code{baseline - permuted} for \code{"concordance"}, so higher is
+#' always more important).
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(Surv(time, status) ~ age + sex + ph.ecog, data = lung)
+#' varimpnbsurv(fit, newdata = lung, times = c(100, 200, 400), n_repeats = 5, seed = 1)
+#'
+#'
+#' @export
+#' @rdname varimp
+varimpnbsurv <- function(object,
                           newdata,
                           times,
                           metric = c("brier", "concordance"),
@@ -890,7 +1131,7 @@ varimp_nbsurv <- function(object,
   feature_names <- names(object$feature_info)
   n <- nrow(newdata)
 
-  baseline <- evaluate_nbsurv(object, newdata = newdata, times = times, metrics = metric)
+  baseline <- evaluatenbsurv(object, newdata = newdata, times = times, metrics = metric)
   baseline_value <- mean(baseline[[metric]])
 
   importance <- vapply(feature_names, function(feature) {
@@ -898,7 +1139,7 @@ varimp_nbsurv <- function(object,
       permuted <- newdata
       permuted[[feature]] <- permuted[[feature]][sample.int(n)]
       result <- tryCatch(
-        evaluate_nbsurv(object, newdata = permuted, times = times, metrics = metric),
+        evaluatenbsurv(object, newdata = permuted, times = times, metrics = metric),
         error = function(e) NULL
       )
       if (is.null(result)) NA_real_ else mean(result[[metric]])
@@ -926,6 +1167,9 @@ varimp_nbsurv <- function(object,
   out
 }
 
+#' @rdname varimp
+#' @method print varimp_nbsurv
+#' @export
 print.varimp_nbsurv <- function(x, ...) {
   cat("nbsurv permutation variable importance\n")
   cat("Metric:", attr(x, "metric"), "| repeats:", attr(x, "n_repeats"), "\n\n")
@@ -933,6 +1177,51 @@ print.varimp_nbsurv <- function(x, ...) {
   invisible(x)
 }
 
+#' Visualization Helpers for nbsurv Results
+#'
+#' Base-graphics plot methods for the result objects returned by
+#' \code{\link{varimpnbsurv}}, \code{\link{cvnbsurv}}, and \code{\link{tunenbsurv}}.
+#'
+#' \code{plot.varimp_nbsurv()} draws a horizontal bar chart of permutation importance,
+#' sorted by increasing importance (largest bar at top).
+#'
+#' \code{plot.cv_nbsurv()} draws the mean cross-validation metric against the evaluation
+#' horizons.
+#'
+#' \code{plot.tune_nbsurv()} draws the mean tuning metric for every candidate row of
+#' \code{param_grid}, highlighting the selected best candidate in red.
+#'
+#' @param x A \code{"varimp_nbsurv"}, \code{"cv_nbsurv"}, or \code{"tune_nbsurv"} object.
+#' @param metric For \code{plot.cv_nbsurv()}: which mean cross-validation metric to plot
+#' against \code{time}. One of \code{"brier"} or \code{"concordance"}.
+#' @param ... Additional arguments passed to the underlying base graphics function
+#' (\code{\link[graphics]{barplot}}, \code{\link[graphics]{matplot}}, or
+#' \code{\link[graphics]{plot}}).
+#' @return The input object, invisibly. Called for its plotting side effect.
+#' @examples
+#' library(survival)
+#'
+#' lung <- stats::na.omit(lung)
+#' lung$status <- as.integer(lung$status == 2)
+#' fit <- nbsurv(Surv(time, status) ~ age + sex + ph.ecog, data = lung)
+#'
+#' vi <- varimpnbsurv(fit, newdata = lung, times = c(100, 200, 400), n_repeats = 5, seed = 1)
+#' plot(vi)
+#'
+#' cvfit <- cvnbsurv(Surv(time, status) ~ age + sex, data = lung, folds = 3, times = c(100, 200, 300))
+#' plot(cvfit)
+#'
+#' grid <- expand.grid(scale = TRUE, laplace = c(0.5, 1, 2), min_sd = 0.05)
+#' tf <- tunenbsurv(
+#'   Surv(time, status) ~ age + sex, data = lung,
+#'   param_grid = grid, folds = 3, times = c(100, 200)
+#' )
+#' plot(tf)
+#'
+#'
+#' @method plot varimp_nbsurv
+#' @export
+#' @rdname viz-helpers
 plot.varimp_nbsurv <- function(x, ...) {
   ord <- order(x$importance)
   graphics::barplot(
@@ -946,6 +1235,9 @@ plot.varimp_nbsurv <- function(x, ...) {
   invisible(x)
 }
 
+#' @rdname viz-helpers
+#' @method plot cv_nbsurv
+#' @export
 plot.cv_nbsurv <- function(x, metric = c("brier", "concordance"), ...) {
   metric <- match.arg(metric)
   graphics::matplot(
@@ -962,6 +1254,9 @@ plot.cv_nbsurv <- function(x, metric = c("brier", "concordance"), ...) {
   invisible(x)
 }
 
+#' @rdname viz-helpers
+#' @method plot tune_nbsurv
+#' @export
 plot.tune_nbsurv <- function(x, ...) {
   values <- x$results$mean_metric
   cols <- rep("black", length(values))

@@ -72,7 +72,7 @@ The returned survival matrix is post-processed to be monotone in time.
 ## Evaluate the fitted model
 
 ```{r}
-metrics <- evaluate_nbsurv(
+metrics <- evaluatenbsurv(
   fit,
   newdata = lung,
   times = times
@@ -81,13 +81,13 @@ metrics <- evaluate_nbsurv(
 metrics
 ```
 
-`evaluate_nbsurv()` reports horizon-specific IPCW Brier scores and
+`evaluatenbsurv()` reports horizon-specific IPCW Brier scores and
 concordance values.
 
 ## Cross-validation
 
 ```{r}
-cv_fit <- cv_nbsurv(
+cv_fit <- cvnbsurv(
   Surv(time, status) ~ age + sex + ph.ecog,
   data = lung,
   folds = 3,
@@ -108,7 +108,7 @@ grid <- data.frame(
 )
 grid$time_grid <- I(list(NULL, NULL))
 
-tuned <- tune_nbsurv(
+tuned <- tunenbsurv(
   Surv(time, status) ~ age + sex + ph.ecog,
   data = lung,
   param_grid = grid,

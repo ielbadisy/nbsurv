@@ -54,7 +54,7 @@ plot(fit, times = c(50, 100, 200, 400, 600, 800))
 ## Evaluation
 
 ```r
-metrics <- evaluate_nbsurv(
+metrics <- evaluatenbsurv(
   fit,
   newdata = lung,
   times = c(100, 200, 400)
@@ -67,7 +67,7 @@ metrics
 #> 3  400 0.2454511   0.4982014
 ```
 
-`evaluate_nbsurv()` currently returns:
+`evaluatenbsurv()` currently returns:
 
 - IPCW Brier score
 - Concordance
@@ -77,7 +77,7 @@ for each requested prediction horizon.
 ## Cross-validation
 
 ```r
-cv_fit <- cv_nbsurv(
+cv_fit <- cvnbsurv(
   Surv(time, status) ~ age + sex + ph.ecog,
   data = lung,
   folds = 3,
@@ -106,7 +106,7 @@ grid <- data.frame(
 )
 grid$time_grid <- I(list(NULL, NULL))
 
-tuned <- tune_nbsurv(
+tuned <- tunenbsurv(
   Surv(time, status) ~ age + sex + ph.ecog,
   data = lung,
   param_grid = grid,
@@ -127,7 +127,7 @@ plot(tuned)
 ## Variable importance
 
 ```r
-vi <- varimp_nbsurv(
+vi <- varimpnbsurv(
   fit,
   newdata = lung,
   times = c(100, 200, 400),
@@ -153,7 +153,7 @@ plot(vi)
 important); `sex` slightly *improves* it when shuffled here, i.e. it
 contributes essentially nothing beyond noise on this fit/horizon set.
 
-`calibration_plot_nbsurv(fit, newdata = lung, horizon = 200)` is also
+`calibrationplotnbsurv(fit, newdata = lung, horizon = 200)` is also
 available for visual calibration assessment at a single horizon.
 
 ## Benchmark vs. `coxph`
@@ -228,7 +228,7 @@ fit_smooth <- nbsurv(
   Surv(time, status) ~ age + sex + ph.ecog,
   data = lung,
   time_smooth = TRUE,
-  bandwidth = 300  # tune via tune_nbsurv() for your data
+  bandwidth = 300  # tune via tunenbsurv() for your data
 )
 ```
 
@@ -249,7 +249,7 @@ bandwidths consistently improve concordance (closing roughly half to
 two-thirds of the gap to `coxph`) but consistently *worsen* Brier score at
 the most extreme horizon (t=400), the expected cost of over-smoothing away
 real horizon-specific calibration. No single bandwidth wins on both
-metrics at every horizon - **tune `bandwidth` via `tune_nbsurv()`'s
+metrics at every horizon - **tune `bandwidth` via `tunenbsurv()`'s
 `param_grid` for your own data** rather than trusting the default.
 
 Even at the best bandwidths tried here, the gap to `coxph` narrows but does
@@ -268,5 +268,5 @@ rather than oversold.
   (independent by default, or jointly via `cov_structure = "full"`).
 - Categorical predictors use Laplace-smoothed probabilities.
 - The package exposes a single clean public API centered on `nbsurv()`,
-  `predict()`, `evaluate_nbsurv()`, `cv_nbsurv()`, `tune_nbsurv()`, and
-  `varimp_nbsurv()`.
+  `predict()`, `evaluatenbsurv()`, `cvnbsurv()`, `tunenbsurv()`, and
+  `varimpnbsurv()`.
