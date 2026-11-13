@@ -18,7 +18,7 @@ test_that("time_smooth = TRUE produces finite, valid predictions (regression gua
   expect_true(all(is.finite(preds)))
   expect_true(all(preds >= 0 & preds <= 1))
 
-  m <- evaluate_nbsurv(fit, newdata = dat, times = c(1, 2, 3))
+  m <- evaluatenbsurv(fit, newdata = dat, times = c(1, 2, 3))
   expect_true(all(is.finite(m$brier)))
   expect_true(all(is.finite(m$concordance)))
 })
@@ -78,14 +78,14 @@ test_that("time_smooth improves held-out concordance at a sparse extreme horizon
   expect_gt(mean(smooth_conc, na.rm = TRUE), mean(diag_conc, na.rm = TRUE) - 0.02)
 })
 
-test_that("tune_nbsurv can search over time_smooth/bandwidth via param_grid", {
+test_that("tunenbsurv can search over time_smooth/bandwidth via param_grid", {
   dat <- simulate_nbsurv_data(n = 150, seed = 34)
   grid <- data.frame(
     scale = TRUE, laplace = 1, min_sd = 0.05,
     time_smooth = c(FALSE, TRUE, TRUE),
     bandwidth = c(NA, 5, 15)
   )
-  tuned <- tune_nbsurv(
+  tuned <- tunenbsurv(
     survival::Surv(time, status) ~ x1 + x2, data = dat,
     param_grid = grid, folds = 3, times = c(1, 2, 3), seed = 1
   )

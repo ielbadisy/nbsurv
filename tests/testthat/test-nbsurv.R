@@ -42,7 +42,7 @@ test_that("categorical predictors reject unseen levels at prediction time", {
   )
 })
 
-test_that("evaluate_nbsurv's concordance is oriented correctly (not its complement)", {
+test_that("evaluatenbsurv's concordance is oriented correctly (not its complement)", {
   # A clearly separable synthetic case: group 1 fails much earlier than
   # group 0. A reasonable model MUST score meaningfully above 0.5 here;
   # concordance_at_horizon() previously returned 1 - true_concordance
@@ -56,12 +56,12 @@ test_that("evaluate_nbsurv's concordance is oriented correctly (not its compleme
   dat <- data.frame(time = event_time, status = status, grp = factor(grp))
 
   fit <- nbsurv(survival::Surv(time, status) ~ grp, data = dat)
-  m <- evaluate_nbsurv(fit, newdata = dat, times = c(10, 20, 40))
+  m <- evaluatenbsurv(fit, newdata = dat, times = c(10, 20, 40))
 
   expect_true(all(m$concordance > 0.7))
 })
 
-test_that("evaluate_nbsurv returns finite metrics", {
+test_that("evaluatenbsurv returns finite metrics", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
 
@@ -69,7 +69,7 @@ test_that("evaluate_nbsurv returns finite metrics", {
   test <- lung[141:nrow(lung), ]
   fit <- nbsurv(survival::Surv(time, status) ~ age + sex + ph.ecog, data = train)
 
-  metrics <- evaluate_nbsurv(fit, newdata = test, times = c(150, 300, 450))
+  metrics <- evaluatenbsurv(fit, newdata = test, times = c(150, 300, 450))
 
   expect_equal(names(metrics), c("time", "brier", "concordance"))
   expect_equal(nrow(metrics), 3)
@@ -92,11 +92,11 @@ test_that("average predicted event risk is in line with observed horizon risk", 
   expect_lt(abs(mean(pred_event) - observed_event), 0.15)
 })
 
-test_that("cv_nbsurv returns fold-level and summary metrics", {
+test_that("cvnbsurv returns fold-level and summary metrics", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
 
-  cv_fit <- cv_nbsurv(
+  cv_fit <- cvnbsurv(
     survival::Surv(time, status) ~ age + sex + ph.ecog,
     data = lung,
     folds = 3,
@@ -111,7 +111,7 @@ test_that("cv_nbsurv returns fold-level and summary metrics", {
   expect_true(all(is.finite(cv_fit$summary$concordance)))
 })
 
-test_that("tune_nbsurv ranks parameter settings and returns the best row", {
+test_that("tunenbsurv ranks parameter settings and returns the best row", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
 
@@ -122,7 +122,7 @@ test_that("tune_nbsurv ranks parameter settings and returns the best row", {
   )
   param_grid$time_grid <- I(list(NULL, NULL))
 
-  tuned <- tune_nbsurv(
+  tuned <- tunenbsurv(
     survival::Surv(time, status) ~ age + sex + ph.ecog,
     data = lung,
     param_grid = param_grid,
@@ -156,14 +156,14 @@ test_that("heavy censoring still yields finite predictions and evaluation metric
 
   eval_times <- as.numeric(stats::quantile(dat$time[dat$status == 1], probs = c(0.25, 0.5), type = 2))
   preds <- predict(fit, newdata = dat[1:20, ], times = eval_times)
-  metrics <- evaluate_nbsurv(fit, newdata = dat, times = eval_times)
+  metrics <- evaluatenbsurv(fit, newdata = dat, times = eval_times)
 
   expect_true(all(is.finite(preds)))
   expect_true(all(is.finite(metrics$brier)))
   expect_true(all(is.finite(metrics$concordance)))
 })
 
-test_that("evaluate_nbsurv returns finite IBS when ibs = TRUE", {
+test_that("evaluatenbsurv returns finite IBS when ibs = TRUE", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
 
@@ -171,21 +171,21 @@ test_that("evaluate_nbsurv returns finite IBS when ibs = TRUE", {
   test  <- lung[141:nrow(lung), ]
   fit <- nbsurv(survival::Surv(time, status) ~ age + sex + ph.ecog, data = train)
 
-  res <- evaluate_nbsurv(fit, newdata = test, times = c(150, 300, 450), ibs = TRUE)
+  res <- evaluatenbsurv(fit, newdata = test, times = c(150, 300, 450), ibs = TRUE)
   ibs_val <- attr(res, "ibs")
 
   expect_true(is.finite(ibs_val))
   expect_true(ibs_val >= 0 && ibs_val <= 1)
 })
 
-test_that("calibration_plot_nbsurv returns a data frame and plots without error", {
+test_that("calibrationplotnbsurv returns a data frame and plots without error", {
   skip_if_not_installed("survival")
   lung <- make_lung_data()
   fit <- nbsurv(survival::Surv(time, status) ~ age + sex, data = lung)
 
   grDevices::pdf(file = tempfile(fileext = ".pdf"))
   on.exit(grDevices::dev.off(), add = TRUE)
-  calib <- calibration_plot_nbsurv(fit, newdata = lung, horizon = 300)
+  calib <- calibrationplotnbsurv(fit, newdata = lung, horizon = 300)
 
   expect_s3_class(calib, "data.frame")
   expect_true(all(c("mean_pred", "observed", "n") %in% names(calib)))

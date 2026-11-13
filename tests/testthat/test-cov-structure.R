@@ -49,8 +49,8 @@ test_that("cov_structure = 'full' improves Brier score under correlated continuo
   fit_full <- nbsurv(survival::Surv(time, status) ~ x1 + x2, data = train, cov_structure = "full")
 
   times <- c(20, 40, 80)
-  m_diag <- evaluate_nbsurv(fit_diag, newdata = test, times = times)
-  m_full <- evaluate_nbsurv(fit_full, newdata = test, times = times)
+  m_diag <- evaluatenbsurv(fit_diag, newdata = test, times = times)
+  m_full <- evaluatenbsurv(fit_full, newdata = test, times = times)
 
   expect_lt(mean(m_full$brier), mean(m_diag$brier))
 })
@@ -61,9 +61,9 @@ test_that("print.nbsurv reports the covariance structure", {
   expect_output(print(fit), "Covariance structure: full")
 })
 
-test_that("cv_nbsurv passes cov_structure/shrinkage through to each fold's fit", {
+test_that("cvnbsurv passes cov_structure/shrinkage through to each fold's fit", {
   dat <- simulate_nbsurv_data(n = 200, seed = 24)
-  cv_fit <- cv_nbsurv(
+  cv_fit <- cvnbsurv(
     survival::Surv(time, status) ~ x1 + x2, data = dat,
     folds = 3, times = c(1, 2, 3), seed = 1, cov_structure = "full"
   )
