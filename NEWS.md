@@ -1,3 +1,7 @@
+# nbsurv 0.6.0
+
+* Numeric 0/1 predictors (indicators such as treatment arm or sex) are now modelled as categorical (Bernoulli) instead of Gaussian. A normal density on two values with class-specific variances added spurious quadratic terms and overdispersed the predictions. Predictions change for models with such predictors.
+
 # nbsurv 0.5.4
 
 * Added `README.Rmd`; `README.md` is now generated from it with `devtools::build_readme()`.

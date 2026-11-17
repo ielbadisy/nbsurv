@@ -85,6 +85,7 @@ nbsurv <- function(formula,
   }
 
   feature_info <- vapply(x, classify_feature, character(1))
+  was_numeric <- vapply(x, is.numeric, logical(1))
   x <- coerce_features(x, feature_info)
   x_raw <- x
 
@@ -109,7 +110,7 @@ nbsurv <- function(formula,
     call = match.call(),
     formula = formula,
     terms = stats::terms(formula, data = data),
-    xlevels = lapply(x[, feature_info == "categorical", drop = FALSE], levels),
+    xlevels = lapply(x[, feature_info == "categorical" & !was_numeric, drop = FALSE], levels),
     feature_info = feature_info,
     training_data = x,
     training_data_raw = x_raw,
@@ -702,6 +703,11 @@ validate_surv_response <- function(y) {
 }
 
 classify_feature <- function(x) {
+  # numeric 0/1 indicators are Bernoulli, not Gaussian: a normal density on two
+  # values with class-specific variances adds spurious quadratic terms
+  if (is.numeric(x) && length(unique(x[!is.na(x)])) == 2L && all(x[!is.na(x)] %in% c(0, 1))) {
+    return("categorical")
+  }
   if (is.numeric(x) || is.integer(x)) {
     return("continuous")
   }
