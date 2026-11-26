@@ -29,8 +29,9 @@ prediction horizon.
 }
 \description{
 Computes horizon-specific survival or event probabilities from a fitted
-conditional naive Bayes survival model. The returned survival curves are
-forced to be non-increasing across increasing time horizons.
+conditional naive Bayes survival model. Survival is made non-increasing on the
+fitted \code{time_grid} and returned as a step function on that grid, so the
+prediction at a horizon does not depend on which other horizons are requested.
 }
 \examples{
 library(survival)
