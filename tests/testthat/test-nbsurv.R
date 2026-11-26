@@ -222,3 +222,14 @@ test_that("plot.nbsurv's curves match predict() on the same raw rows (no double-
 
   expect_equal(unname(plotted), unname(direct))
 })
+
+test_that("predictions do not depend on the other requested horizons", {
+  d <- stats::na.omit(survival::pbc[, c("time", "status", "age", "bili", "albumin", "edema")])
+  d$status <- as.integer(d$status == 2)
+  for (sm in c(FALSE, TRUE)) {
+    fit <- nbsurv(survival::Surv(time, status) ~ ., data = d, time_smooth = sm)
+    tg <- stats::quantile(d$time, seq(0.1, 0.9, 0.1))
+    expect_equal(unname(predict(fit, d, tg)[, 5]), unname(predict(fit, d, tg[5])[, 1]))
+    expect_equal(unname(predict(fit, d, rev(tg))[, 5]), unname(predict(fit, d, tg)[, 5]))
+  }
+})

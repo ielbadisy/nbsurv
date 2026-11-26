@@ -1,3 +1,11 @@
+# nbsurv 0.6.1
+
+* `predict.nbsurv()` no longer depends on the set of requested horizons. Each horizon is a
+  separate classifier, so the raw curve need not be monotone, and the cumulative minimum used to
+  be taken over the requested horizons only: the prediction at a time changed with the other
+  times asked for. Monotonicity is now enforced on the fitted `time_grid` (the training event
+  times by default) and the curve is returned as a step function on that grid.
+
 # nbsurv 0.6.0
 
 * Numeric 0/1 predictors (indicators such as treatment arm or sex) are now modelled as categorical (Bernoulli) instead of Gaussian. A normal density on two values with class-specific variances added spurious quadratic terms and overdispersed the predictions. Predictions change for models with such predictors.

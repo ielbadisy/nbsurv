@@ -469,8 +469,9 @@ tunenbsurv <- function(formula,
 #' Predict Survival Probabilities from a nbsurv Model
 #'
 #' Computes horizon-specific survival or event probabilities from a fitted
-#' conditional naive Bayes survival model. The returned survival curves are
-#' forced to be non-increasing across increasing time horizons.
+#' conditional naive Bayes survival model. Survival is made non-increasing on the
+#' fitted \code{time_grid} and returned as a step function on that grid, so the
+#' prediction at a horizon does not depend on which other horizons are requested.
 #'
 #' @param object A fitted \code{"nbsurv"} model.
 #' @param newdata A data frame of predictor values.
@@ -501,95 +502,18 @@ predict.nbsurv <- function(object,
   times <- validate_prediction_times(times)
   new_x <- prepare_newdata(object, newdata)
 
-  surv_probs <- matrix(NA_real_, nrow = nrow(new_x), ncol = length(times))
+  # Each horizon is a separate classifier, so the raw curve need not be monotone. Monotonicity is
+  # enforced on the fitted time grid, and the curve is a step function on that grid, so a prediction
+  # at t does not depend on which other horizons are requested.
+  grid <- object$time_grid[object$time_grid <= max(times)]
+  surv_probs <- if (length(grid)) {
+    s <- enforce_monotone_survival(raw_survival(object, new_x, grid))
+    cbind(1, s)[, findInterval(times, grid) + 1L, drop = FALSE]
+  } else {
+    matrix(1, nrow(new_x), length(times))
+  }
   colnames(surv_probs) <- paste0("t_", format(times, trim = TRUE, scientific = FALSE))
   rownames(surv_probs) <- rownames(new_x)
-
-  train_x <- object$training_data
-  cont_vars <- names(object$feature_info[object$feature_info == "continuous"])
-  cat_vars <- names(object$feature_info[object$feature_info == "categorical"])
-  has_smooth <- !is.null(object$grid_stats)
-
-  for (j in seq_along(times)) {
-    horizon <- times[j]
-    prior_surv <- clip_prob(object$event_survival(horizon), object$eps)
-
-    log_surv <- rep(log(prior_surv), nrow(new_x))
-    log_event <- rep(log1p(-prior_surv), nrow(new_x))
-
-    if (has_smooth) {
-      cont_stats <- if (length(cont_vars) > 0L) {
-        smoothed_continuous_stats(object$grid_stats, horizon, object$bandwidth)
-      } else {
-        NULL
-      }
-    } else {
-      event_weights <- event_case_weights(object, horizon)
-      survivor_index <- object$times >= horizon
-    }
-
-    if (length(cont_vars) > 0L) {
-      if (!has_smooth) {
-        cont_stats <- continuous_statistics(
-          train_x = train_x[, cont_vars, drop = FALSE],
-          event_weights = event_weights,
-          survivor_index = survivor_index,
-          min_sd = object$min_sd,
-          cov_structure = if (is.null(object$cov_structure)) "diagonal" else object$cov_structure,
-          shrinkage = if (is.null(object$shrinkage)) 0.2 else object$shrinkage
-        )
-      }
-
-      if (!is.null(cont_stats)) {
-        new_cont <- as.matrix(new_x[, cont_vars, drop = FALSE])
-        use_full <- identical(object$cov_structure, "full") &&
-          length(cont_vars) >= 2L && !is.null(cont_stats$survivor_cov)
-        if (use_full) {
-          log_surv <- log_surv + mvnorm_log_density(
-            new_cont, cont_stats$survivor_mean, cont_stats$survivor_cov
-          )
-          log_event <- log_event + mvnorm_log_density(
-            new_cont, cont_stats$event_mean, cont_stats$event_cov
-          )
-        } else {
-          log_surv <- log_surv + colSums(stats::dnorm(
-            x = t(new_cont),
-            mean = cont_stats$survivor_mean,
-            sd = cont_stats$survivor_sd,
-            log = TRUE
-          ))
-          log_event <- log_event + colSums(stats::dnorm(
-            x = t(new_cont),
-            mean = cont_stats$event_mean,
-            sd = cont_stats$event_sd,
-            log = TRUE
-          ))
-        }
-      }
-    }
-
-    if (length(cat_vars) > 0L) {
-      for (var in cat_vars) {
-        cat_probs <- if (has_smooth) {
-          smoothed_categorical_probs(object$grid_stats, var, horizon, object$bandwidth)
-        } else {
-          categorical_statistics(
-            values = train_x[[var]],
-            event_weights = event_weights,
-            survivor_index = survivor_index,
-            laplace = object$laplace
-          )
-        }
-        new_values <- as.character(new_x[[var]])
-        log_surv <- log_surv + log(clip_prob(unname(cat_probs$survivor[new_values]), object$eps))
-        log_event <- log_event + log(clip_prob(unname(cat_probs$event[new_values]), object$eps))
-      }
-    }
-
-    surv_probs[, j] <- logistic_from_logs(log_surv, log_event)
-  }
-
-  surv_probs <- enforce_monotone_survival(surv_probs)
   if (type == "event") {
     return(1 - surv_probs)
   }
@@ -959,6 +883,96 @@ logistic_from_logs <- function(log_surv, log_event) {
   margin <- log_event - log_surv
   probs <- 1 / (1 + exp(margin))
   pmin(pmax(probs, 0), 1)
+}
+
+# Raw (not yet monotone) survival probabilities of new_x at each horizon in `times`.
+raw_survival <- function(object, new_x, times) {
+  surv_probs <- matrix(NA_real_, nrow = nrow(new_x), ncol = length(times))
+  train_x <- object$training_data
+  cont_vars <- names(object$feature_info[object$feature_info == "continuous"])
+  cat_vars <- names(object$feature_info[object$feature_info == "categorical"])
+  has_smooth <- !is.null(object$grid_stats)
+
+  for (j in seq_along(times)) {
+    horizon <- times[j]
+    prior_surv <- clip_prob(object$event_survival(horizon), object$eps)
+
+    log_surv <- rep(log(prior_surv), nrow(new_x))
+    log_event <- rep(log1p(-prior_surv), nrow(new_x))
+
+    if (has_smooth) {
+      cont_stats <- if (length(cont_vars) > 0L) {
+        smoothed_continuous_stats(object$grid_stats, horizon, object$bandwidth)
+      } else {
+        NULL
+      }
+    } else {
+      event_weights <- event_case_weights(object, horizon)
+      survivor_index <- object$times >= horizon
+    }
+
+    if (length(cont_vars) > 0L) {
+      if (!has_smooth) {
+        cont_stats <- continuous_statistics(
+          train_x = train_x[, cont_vars, drop = FALSE],
+          event_weights = event_weights,
+          survivor_index = survivor_index,
+          min_sd = object$min_sd,
+          cov_structure = if (is.null(object$cov_structure)) "diagonal" else object$cov_structure,
+          shrinkage = if (is.null(object$shrinkage)) 0.2 else object$shrinkage
+        )
+      }
+
+      if (!is.null(cont_stats)) {
+        new_cont <- as.matrix(new_x[, cont_vars, drop = FALSE])
+        use_full <- identical(object$cov_structure, "full") &&
+          length(cont_vars) >= 2L && !is.null(cont_stats$survivor_cov)
+        if (use_full) {
+          log_surv <- log_surv + mvnorm_log_density(
+            new_cont, cont_stats$survivor_mean, cont_stats$survivor_cov
+          )
+          log_event <- log_event + mvnorm_log_density(
+            new_cont, cont_stats$event_mean, cont_stats$event_cov
+          )
+        } else {
+          log_surv <- log_surv + colSums(stats::dnorm(
+            x = t(new_cont),
+            mean = cont_stats$survivor_mean,
+            sd = cont_stats$survivor_sd,
+            log = TRUE
+          ))
+          log_event <- log_event + colSums(stats::dnorm(
+            x = t(new_cont),
+            mean = cont_stats$event_mean,
+            sd = cont_stats$event_sd,
+            log = TRUE
+          ))
+        }
+      }
+    }
+
+    if (length(cat_vars) > 0L) {
+      for (var in cat_vars) {
+        cat_probs <- if (has_smooth) {
+          smoothed_categorical_probs(object$grid_stats, var, horizon, object$bandwidth)
+        } else {
+          categorical_statistics(
+            values = train_x[[var]],
+            event_weights = event_weights,
+            survivor_index = survivor_index,
+            laplace = object$laplace
+          )
+        }
+        new_values <- as.character(new_x[[var]])
+        log_surv <- log_surv + log(clip_prob(unname(cat_probs$survivor[new_values]), object$eps))
+        log_event <- log_event + log(clip_prob(unname(cat_probs$event[new_values]), object$eps))
+      }
+    }
+
+    surv_probs[, j] <- logistic_from_logs(log_surv, log_event)
+  }
+
+  surv_probs
 }
 
 enforce_monotone_survival <- function(x) {
