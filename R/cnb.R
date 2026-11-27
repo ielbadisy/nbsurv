@@ -289,11 +289,19 @@ evaluatenbsurv <- function(object,
   metrics <- unique(match.arg(metrics, choices = c("brier", "concordance"), several.ok = TRUE))
   times <- validate_prediction_times(times)
 
-  mf <- stats::model.frame(object$formula, data = newdata, na.action = stats::na.fail)
-  y <- stats::model.response(mf)
-  validate_surv_response(y)
+  mf <- eval_frame(object, newdata)
+  score_metrics(object, stats::model.response(mf), 1 - predict_x(object, prep_x(object, mf[-1]), times),
+                times, metrics, ibs)
+}
 
-  preds <- predict(object, newdata = mf, times = times, type = "event")
+# Model frame of `newdata` with the response; columns named as the model's terms (e.g. `log1p(x)`).
+eval_frame <- function(object, newdata) {
+  mf <- stats::model.frame(object$terms, data = newdata, na.action = stats::na.fail, xlev = object$xlevels)
+  validate_surv_response(stats::model.response(mf))
+  mf
+}
+
+score_metrics <- function(object, y, preds, times, metrics, ibs = FALSE) {
   obs_time <- y[, "time"]
   obs_status <- y[, "status"]
 
@@ -363,11 +371,9 @@ calibrationplotnbsurv <- function(object, newdata, horizon, n_groups = 10, ...) 
     stop("`horizon` must be a single prediction time.")
   }
 
-  mf <- stats::model.frame(object$formula, data = newdata, na.action = stats::na.fail)
+  mf <- eval_frame(object, newdata)
   y <- stats::model.response(mf)
-  validate_surv_response(y)
-
-  pred_event <- as.numeric(predict(object, newdata = mf, times = times, type = "event")[, 1L])
+  pred_event <- 1 - as.numeric(predict_x(object, prep_x(object, mf[-1]), times)[, 1L])
   obs_time <- y[, "time"]
   obs_status <- y[, "status"]
 
@@ -500,8 +506,15 @@ predict.nbsurv <- function(object,
                            ...) {
   type <- match.arg(type)
   times <- validate_prediction_times(times)
-  new_x <- prepare_newdata(object, newdata)
+  surv_probs <- predict_x(object, prepare_newdata(object, newdata), times)
+  if (type == "event") {
+    return(1 - surv_probs)
+  }
+  surv_probs
+}
 
+# Survival matrix for features already coerced and scaled (rows of `new_x`, columns `times`).
+predict_x <- function(object, new_x, times) {
   # Each horizon is a separate classifier, so the raw curve need not be monotone. Monotonicity is
   # enforced on the fitted time grid, and the curve is a step function on that grid, so a prediction
   # at t does not depend on which other horizons are requested.
@@ -514,9 +527,6 @@ predict.nbsurv <- function(object,
   }
   colnames(surv_probs) <- paste0("t_", format(times, trim = TRUE, scientific = FALSE))
   rownames(surv_probs) <- rownames(new_x)
-  if (type == "event") {
-    return(1 - surv_probs)
-  }
   surv_probs
 }
 
@@ -583,12 +593,7 @@ plot.nbsurv <- function(x, times = NULL, n_curves = 5, ...) {
     stop("No times available for plotting.")
   }
 
-  curves <- predict.nbsurv(
-    x,
-    newdata = utils::head(x$training_data_raw, n_curves),
-    times = times,
-    type = "survival"
-  )
+  curves <- predict_x(x, utils::head(x$training_data, n_curves), times)
 
   graphics::matplot(
     x = times,
@@ -995,12 +1000,11 @@ validate_prediction_times <- function(times) {
 
 prepare_newdata <- function(object, newdata) {
   terms_x <- stats::delete.response(object$terms)
-  mf <- stats::model.frame(
-    terms_x,
-    data = newdata,
-    na.action = stats::na.fail,
-    xlev = object$xlevels
-  )
+  prep_x(object, stats::model.frame(terms_x, data = newdata, na.action = stats::na.fail, xlev = object$xlevels))
+}
+
+# Coerce and scale the predictor columns of a model frame as at fit time.
+prep_x <- function(object, mf) {
   mf <- coerce_features(mf, object$feature_info)
 
   cont_vars <- names(object$feature_info[object$feature_info == "continuous"])
@@ -1149,22 +1153,19 @@ varimpnbsurv <- function(object,
   }
 
   feature_names <- names(object$feature_info)
-  n <- nrow(newdata)
-
-  baseline <- evaluatenbsurv(object, newdata = newdata, times = times, metrics = metric)
-  baseline_value <- mean(baseline[[metric]])
+  times <- validate_prediction_times(times)
+  # permute model-frame columns, so a term such as log1p(x) is permuted as a whole
+  mf <- eval_frame(object, newdata)
+  y <- stats::model.response(mf); x <- mf[-1]; n <- nrow(x)
+  sc <- function(x) mean(score_metrics(object, y, 1 - predict_x(object, prep_x(object, x), times),
+                                          times, metric)[[metric]])
+  baseline_value <- sc(x)
 
   importance <- vapply(feature_names, function(feature) {
-    permuted_values <- vapply(seq_len(n_repeats), function(rep) {
-      permuted <- newdata
-      permuted[[feature]] <- permuted[[feature]][sample.int(n)]
-      result <- tryCatch(
-        evaluatenbsurv(object, newdata = permuted, times = times, metrics = metric),
-        error = function(e) NULL
-      )
-      if (is.null(result)) NA_real_ else mean(result[[metric]])
-    }, numeric(1))
-    mean(permuted_values, na.rm = TRUE)
+    mean(vapply(seq_len(n_repeats), function(rep) {
+      x[[feature]] <- x[[feature]][sample.int(n)]
+      sc(x)
+    }, numeric(1)))
   }, numeric(1))
 
   score <- if (metric == "brier") {
