@@ -632,9 +632,9 @@ validate_surv_response <- function(y) {
 }
 
 classify_feature <- function(x) {
-  # numeric 0/1 indicators are Bernoulli, not Gaussian: a normal density on two
-  # values with class-specific variances adds spurious quadratic terms
-  if (is.numeric(x) && length(unique(x[!is.na(x)])) == 2L && all(x[!is.na(x)] %in% c(0, 1))) {
+  # two-valued numeric predictors (0/1, 1/2, ...) are Bernoulli, not Gaussian: a normal density on
+  # two values with class-specific variances adds spurious quadratic terms
+  if (is.numeric(x) && length(unique(x[!is.na(x)])) == 2L) {
     return("categorical")
   }
   if (is.numeric(x) || is.integer(x)) {
