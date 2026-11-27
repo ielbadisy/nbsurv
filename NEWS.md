@@ -3,6 +3,9 @@
 * `evaluatenbsurv()`, `calibrationplotnbsurv()`, `varimpnbsurv()`, `cvnbsurv()` and `plot()` now
   work with transformed terms in the formula, such as `log1p(x)`; they used to stop with "object not
   found". `varimpnbsurv()` permutes model terms, so `log1p(x)` is permuted as a whole.
+* Every two-valued numeric predictor is now modelled as categorical (Bernoulli), not only 0/1. A
+  1/2 coding (as in `survival::lung$sex`) was modelled as Gaussian and gave different predictions
+  from the same variable coded 0/1. Predictions change for models with such predictors.
 
 # nbsurv 0.6.1
 
