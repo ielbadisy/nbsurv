@@ -1,3 +1,9 @@
+# nbsurv 0.6.2
+
+* `evaluatenbsurv()`, `calibrationplotnbsurv()`, `varimpnbsurv()`, `cvnbsurv()` and `plot()` now
+  work with transformed terms in the formula, such as `log1p(x)`; they used to stop with "object not
+  found". `varimpnbsurv()` permutes model terms, so `log1p(x)` is permuted as a whole.
+
 # nbsurv 0.6.1
 
 * `predict.nbsurv()` no longer depends on the set of requested horizons. Each horizon is a
